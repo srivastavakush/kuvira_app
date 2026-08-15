@@ -95,6 +95,37 @@ export const api = {
   aiInsights: () => request('/ai/insights'),
   aiRecommendations: () => request('/ai/recommendations'),
 
+  // Capabilities / workspace
+  capabilities: () => request('/capabilities'),
+
+  // Coach booking
+  coachAvailability: (id: string, date: string) => request(`/coaches/${id}/availability?date=${date}`),
+  bookCoachSession: (coach_id: string, date: string, slot: string) =>
+    request('/coach-sessions', { method: 'POST', body: JSON.stringify({ coach_id, date, slot }) }),
+  myCoachSessions: () => request('/coach-sessions/mine'),
+
+  // Training plans
+  trainingPlans: () => request('/training/plans'),
+  createTrainingPlan: (goal: string, weeks = 4) =>
+    request('/training/plans', { method: 'POST', body: JSON.stringify({ goal, weeks }) }),
+  toggleDrill: (planId: string, drillId: string) =>
+    request(`/training/plans/${planId}/drills/${drillId}/toggle`, { method: 'POST' }),
+  trainingStreak: () => request('/training/streak'),
+
+  // Rankings & achievements
+  rankings: (scope: 'city' | 'global' = 'city') => request(`/rankings?scope=${scope}`),
+  achievements: () => request('/achievements'),
+
+  // Referrals
+  myReferral: () => request('/referrals/me'),
+  applyReferral: (code: string) => request('/referrals/apply', { method: 'POST', body: JSON.stringify({ code }) }),
+
+  // Club workspace
+  org: (orgId: string) => request(`/orgs/${orgId}`),
+  orgAnalytics: (orgId: string) => request(`/orgs/${orgId}/analytics`),
+  orgBookings: (orgId: string) => request(`/orgs/${orgId}/bookings`),
+  orgMembers: (orgId: string) => request(`/orgs/${orgId}/members`),
+
   // Search
   search: (q: string) => request(`/search?q=${encodeURIComponent(q)}`),
 };

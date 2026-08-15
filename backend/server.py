@@ -9,81 +9,35 @@ MVP scope:
 - Coaches, Events, Tournaments discovery
 - Seeder for demo data
 """
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
-from fastapi.responses import StreamingResponse
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
-import jwt
-import uuid
-import logging
-from pathlib import Path
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
+from pymongo.errors import DuplicateKeyError
 
 from seed_data import (
     SPORTS, SKILL_LEVELS, FACILITIES, PLAYERS, COACHES,
     EVENTS, TOURNAMENTS, GAMES, PRODUCTS, COMMUNITY_POSTS,
 )
+from deps import (
+    db, client, gen_id, utcnow, strip_id, make_token, current_user, optional_user,
+    current_capabilities, _load_capabilities, KuviraError, log, configure_logging,
+    request_id_ctx, EMERGENT_LLM_KEY, CORS_ALLOWED_ORIGINS, APP_ENV, IS_PROD,
+)
+import otp_service
+import features
+import org_admin
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+PLATFORM_ADMIN_MOBILES = [m.strip() for m in os.environ.get("PLATFORM_ADMIN_MOBILES", "").split(",") if m.strip()]
 
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ["DB_NAME"]
-JWT_SECRET = os.environ["JWT_SECRET"]
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
-
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+configure_logging()
 
 app = FastAPI(title="Kuvira Sports API")
 api = APIRouter(prefix="/api")
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-log = logging.getLogger("kuvira")
-
-# ---------------------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------------------
-
-def gen_id() -> str:
-    return str(uuid.uuid4())
-
-def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-def strip_id(doc: dict) -> dict:
-    if doc and "_id" in doc:
-        doc.pop("_id", None)
-    return doc
-
-def make_token(user_id: str) -> str:
-    payload = {"sub": user_id, "iat": int(utcnow().timestamp()), "exp": int((utcnow() + timedelta(days=30)).timestamp())}
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
-
-async def current_user(authorization: Optional[str] = Header(None)) -> dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing or invalid Authorization header")
-    token = authorization.split(" ", 1)[1]
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-    except jwt.PyJWTError:
-        raise HTTPException(401, "Invalid token")
-    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(401, "User not found")
-    return user
-
-async def optional_user(authorization: Optional[str] = Header(None)) -> Optional[dict]:
-    if not authorization:
-        return None
-    try:
-        return await current_user(authorization)
-    except HTTPException:
-        return None
 
 # ---------------------------------------------------------------------------
 # Models
@@ -167,13 +121,83 @@ async def seed_if_empty():
         await db.posts.insert_many([p.copy() for p in COMMUNITY_POSTS])
     log.info("Seed complete.")
 
+async def ensure_indexes():
+    await db.users.create_index("mobile", unique=True)
+    await db.users.create_index("referral_code", sparse=True)
+    # Concurrency-safe booking: one confirmed booking per court/date/slot
+    await db.bookings.create_index(
+        [("facility_id", 1), ("court_number", 1), ("date", 1), ("slot", 1)],
+        unique=True, name="uniq_slot",
+    )
+    await db.bookings.create_index("user_id")
+    await db.coach_sessions.create_index(
+        [("coach_id", 1), ("date", 1), ("slot", 1)], unique=True, name="uniq_coach_slot",
+    )
+    await db.coach_sessions.create_index("user_id")
+    await db.organization_memberships.create_index([("user_id", 1), ("org_id", 1)], unique=True)
+    await db.organization_memberships.create_index("org_id")
+    await db.facilities.create_index("org_id", sparse=True)
+    await db.facilities.create_index("city")
+    await db.games.create_index("facility_id")
+    await db.orders.create_index("user_id")
+    await db.posts.create_index("created_at")
+    await db.training_plans.create_index("user_id")
+    await db.training_activity.create_index([("user_id", 1), ("day", 1)], unique=True)
+    log.info("Indexes ensured.")
+
+
 @app.on_event("startup")
 async def _startup():
-    await seed_if_empty()
+    await ensure_indexes()
+    if not IS_PROD:
+        await seed_if_empty()
+    else:
+        log.info("Production mode: demo seeding skipped.")
 
 @app.on_event("shutdown")
 async def _shutdown():
     client.close()
+
+
+# ---------------------------------------------------------------------------
+# Request-id middleware + standardized error handlers
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    rid = request.headers.get("X-Request-ID") or gen_id()
+    request_id_ctx.set(rid)
+    start = utcnow()
+    response = await call_next(request)
+    ms = int((utcnow() - start).total_seconds() * 1000)
+    response.headers["X-Request-ID"] = rid
+    log.info("%s %s -> %s (%dms)", request.method, request.url.path, response.status_code, ms)
+    return response
+
+
+@app.exception_handler(KuviraError)
+async def kuvira_error_handler(request: Request, exc: KuviraError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": exc.code, "message": exc.message}, "request_id": request_id_ctx.get()},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_error_handler(request: Request, exc: HTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict) and "code" in detail:
+        content = {"error": detail, "request_id": request_id_ctx.get()}
+    else:
+        content = {"error": {"code": "HTTP_ERROR", "message": str(detail)}, "request_id": request_id_ctx.get()}
+    return JSONResponse(status_code=exc.status_code, content=content)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request", "details": exc.errors()[:5]}, "request_id": request_id_ctx.get()},
+    )
 
 # ---------------------------------------------------------------------------
 # Health
@@ -181,53 +205,65 @@ async def _shutdown():
 
 @api.get("/")
 async def root():
-    return {"app": "Kuvira Sports", "status": "ok"}
+    return {"app": "Kuvira Sports", "status": "ok", "env": APP_ENV}
 
 @api.get("/health")
 async def health():
     return {"status": "ok", "time": utcnow().isoformat()}
 
+@api.get("/readiness")
+async def readiness():
+    try:
+        await db.command("ping")
+        return {"ready": True}
+    except Exception:
+        raise KuviraError(503, "NOT_READY", "Database not reachable")
+
 # ---------------------------------------------------------------------------
-# Auth — mobile + OTP (mock: any mobile, OTP = 123456)
+# Auth — mobile + OTP (env-gated: mock in dev, Twilio Verify in prod)
 # ---------------------------------------------------------------------------
-FIXED_OTP = "123456"
 
 @api.post("/auth/otp/start")
 async def otp_start(body: OTPStart):
     mobile = body.mobile.strip()
     if len(mobile) < 6:
-        raise HTTPException(400, "Invalid mobile number")
-    # In production we'd send SMS; for MVP we return demo OTP for UX hint
-    return {"sent": True, "demo_otp": FIXED_OTP, "message": f"OTP sent to {mobile} (demo: {FIXED_OTP})"}
+        raise KuviraError(400, "INVALID_MOBILE", "Invalid mobile number")
+    return await otp_service.send_otp(mobile)
 
 @api.post("/auth/otp/verify")
 async def otp_verify(body: OTPVerify):
-    if body.otp != FIXED_OTP:
-        raise HTTPException(400, "Invalid OTP. For demo, use 123456.")
-    user = await db.users.find_one({"mobile": body.mobile}, {"_id": 0})
+    mobile = body.mobile.strip()
+    ok = await otp_service.verify_otp(mobile, body.otp)
+    if not ok:
+        raise KuviraError(400, "OTP_INVALID", "Invalid or expired OTP")
+    user = await db.users.find_one({"mobile": mobile}, {"_id": 0})
     is_new = False
-    if not user:
-        user = {
-            "id": gen_id(),
-            "mobile": body.mobile,
-            "name": None,
-            "avatar": None,
-            "city": None,
-            "area": None,
-            "primary_sport": None,
-            "sports": [],
-            "skill_level": None,
-            "onboarded": False,
-            "created_at": utcnow().isoformat(),
-        }
-        await db.users.insert_one(user.copy())
-        is_new = True
+    if not user or user.get("invited"):
+        if user and user.get("invited"):
+            # activate invited account (e.g. club owner provisioned by admin)
+            await db.users.update_one({"id": user["id"]}, {"$set": {"invited": False}})
+            user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+            is_new = not user.get("onboarded")
+        else:
+            user = {
+                "id": gen_id(), "mobile": mobile, "name": None, "avatar": None,
+                "city": None, "area": None, "primary_sport": None, "sports": [],
+                "skill_level": None, "onboarded": False, "credits": 0,
+                "created_at": utcnow().isoformat(),
+            }
+            await db.users.insert_one(user.copy())
+            is_new = True
+    # Backend-controlled platform admin bootstrap (never client-selectable)
+    if mobile in PLATFORM_ADMIN_MOBILES and not user.get("is_platform_admin"):
+        await db.users.update_one({"id": user["id"]}, {"$set": {"is_platform_admin": True}})
+        user["is_platform_admin"] = True
     token = make_token(user["id"])
     return {"token": token, "user": strip_id(user), "is_new": is_new}
 
 @api.get("/me")
 async def me(user=Depends(current_user)):
-    return user
+    caps = await _load_capabilities(user)
+    return {**user, "capabilities": caps}
 
 @api.post("/onboarding")
 async def onboarding(body: OnboardingPayload, user=Depends(current_user)):
@@ -306,7 +342,10 @@ async def facility_availability(fid: str, date: str):
 async def create_booking(body: BookingCreate, user=Depends(current_user)):
     f = await db.facilities.find_one({"id": body.facility_id}, {"_id": 0})
     if not f:
-        raise HTTPException(404, "Facility not found")
+        raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
+    if body.court_number < 1 or body.court_number > f.get("courts_count", 1):
+        raise KuviraError(400, "INVALID_COURT", "Invalid court number")
+    price = f["price_per_hour"]  # server-side price; client value is never trusted
     booking = {
         "id": gen_id(),
         "user_id": user["id"],
@@ -317,12 +356,16 @@ async def create_booking(body: BookingCreate, user=Depends(current_user)):
         "date": body.date,
         "slot": body.slot,
         "duration_min": body.duration_min,
-        "price": f["price_per_hour"],
+        "price": price,
         "status": "confirmed",
-        "payment": {"provider": "mock_payu", "status": "paid", "amount": f["price_per_hour"]},
+        "payment": {"provider": "mock_payu", "status": "paid", "amount": price},
         "created_at": utcnow().isoformat(),
     }
-    await db.bookings.insert_one(booking.copy())
+    try:
+        # Unique index on (facility_id, court_number, date, slot) makes this atomic.
+        await db.bookings.insert_one(booking.copy())
+    except DuplicateKeyError:
+        raise KuviraError(409, "BOOKING_SLOT_UNAVAILABLE", "This slot is no longer available.")
     return strip_id(booking)
 
 @api.get("/bookings/mine")
@@ -392,12 +435,27 @@ async def create_game(body: GameCreate, user=Depends(current_user)):
 async def join_game(gid: str, user=Depends(current_user)):
     g = await db.games.find_one({"id": gid}, {"_id": 0})
     if not g:
-        raise HTTPException(404, "Game not found")
+        raise KuviraError(404, "GAME_NOT_FOUND", "Game not found")
+    if g.get("status") == "cancelled":
+        raise KuviraError(400, "GAME_CANCELLED", "This game was cancelled")
     if user["id"] in g.get("current_players", []):
         return await _enrich_game(g)
-    if len(g["current_players"]) >= g["max_players"]:
-        raise HTTPException(400, "Game is full")
-    await db.games.update_one({"id": gid}, {"$push": {"current_players": user["id"]}})
+    # Atomic, capacity-safe join: only push if not full and user not already in.
+    res = await db.games.update_one(
+        {
+            "id": gid,
+            "current_players": {"$ne": user["id"]},
+            f"current_players.{g['max_players'] - 1}": {"$exists": False},
+        },
+        {"$push": {"current_players": user["id"]}},
+    )
+    if res.modified_count == 0:
+        raise KuviraError(409, "GAME_FULL", "Game is full")
+    # First-game referral reward (idempotent inside helper)
+    try:
+        await features.award_first_game_referral(user["id"])
+    except Exception:
+        log.exception("referral reward failed")
     g = await db.games.find_one({"id": gid}, {"_id": 0})
     return await _enrich_game(g)
 
@@ -777,15 +835,24 @@ async def search(q: str):
     }
 
 # ---------------------------------------------------------------------------
-# Wire router & CORS
+# Capabilities (backend-determined; drives workspace switching in the app)
+# ---------------------------------------------------------------------------
+@api.get("/capabilities")
+async def capabilities(caps=Depends(current_capabilities)):
+    return caps
+
+# ---------------------------------------------------------------------------
+# Wire routers & CORS
 # ---------------------------------------------------------------------------
 
 app.include_router(api)
+app.include_router(features.router)
+app.include_router(org_admin.router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -53,7 +53,7 @@ export default function Onboarding() {
         {step === 0 && (
           <View>
             <Text style={styles.h1}>Welcome to Kuvira.</Text>
-            <Text style={styles.sub}>Let's set up your player identity.</Text>
+            <Text style={styles.sub}>Let{'\u2019'}s set up your player identity.</Text>
             <Text style={styles.label}>Your name</Text>
             <TextInput testID="onboarding-name-input" value={name} onChangeText={setName} placeholder="e.g. Arjun" placeholderTextColor={colors.onSurfaceMuted} style={styles.input} />
             <Text style={styles.label}>City</Text>

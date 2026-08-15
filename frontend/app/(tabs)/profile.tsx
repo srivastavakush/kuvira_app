@@ -16,16 +16,19 @@ export default function Profile() {
   const [insights, setInsights] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
+  const [orgs, setOrgs] = useState<any[]>([]);
 
   useEffect(() => {
     (async () => {
       try {
-        const [ins, o, b] = await Promise.all([
+        const [ins, o, b, caps] = await Promise.all([
           api.aiInsights().catch(() => null),
           api.myOrders().catch(() => []),
           api.myBookings().catch(() => []),
+          api.capabilities().catch(() => null),
         ]);
         setInsights(ins); setOrders(o); setBookings(b);
+        if (caps?.organizations) setOrgs(caps.organizations);
       } catch {}
     })();
   }, []);
@@ -96,13 +99,31 @@ export default function Profile() {
           </Pressable>
         </Card>
 
+        {/* Manage Club (only if user has an org membership — backend-determined) */}
+        {orgs.length > 0 && (
+          <View style={{ marginTop: spacing.md, paddingHorizontal: spacing.lg }}>
+            <Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.sm, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', marginBottom: spacing.sm }}>Workspaces</Text>
+            {orgs.map((o: any) => (
+              <Pressable key={o.org_id} testID={`profile-club-${o.org_id}`} style={styles.menuRow} onPress={() => router.push(`/club/${o.org_id}`)}>
+                <Ionicons name="business" size={20} color={colors.brandPrimary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuLabel}>{o.name}</Text>
+                  <Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.xs }}>{o.role.replace('CLUB_', '').replace('_', ' ')}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceMuted} />
+              </Pressable>
+            ))}
+          </View>
+        )}
+
         {/* Menu */}
         <View style={{ marginTop: spacing.xl, paddingHorizontal: spacing.lg }}>
           {[
+            { key: 'training', label: 'Training Plans', icon: 'barbell', to: '/training' },
+            { key: 'rankings', label: 'Rankings & Badges', icon: 'trophy', to: '/rankings' },
+            { key: 'refer', label: 'Refer & Earn', icon: 'gift', to: '/refer' },
             { key: 'bookings', label: `My Bookings (${bookings.length})`, icon: 'calendar', to: '/(tabs)/play' },
             { key: 'orders', label: `My Orders (${orders.length})`, icon: 'bag', to: '/marketplace' },
-            { key: 'wishlist', label: 'Saved Items', icon: 'bookmark', to: '/marketplace' },
-            { key: 'settings', label: 'Settings', icon: 'settings-outline', to: '/(tabs)/profile' },
           ].map((it) => (
             <Pressable key={it.key} testID={`profile-menu-${it.key}`} style={styles.menuRow} onPress={() => router.push(it.to as any)}>
               <Ionicons name={it.icon as any} size={20} color={colors.onSurfaceSecondary} />

@@ -107,9 +107,11 @@ def test_facility_availability(api_client, base_url):
 def test_create_booking_and_verify(api_client, base_url, auth_headers):
     facilities = api_client.get(f"{base_url}/api/facilities").json()
     fid = facilities[0]["id"]
-    payload = {"facility_id": fid, "court_number": 1, "date": "2026-02-15", "slot": "18:00-19:00", "duration_min": 60}
+    # Use unique date to avoid unique-slot collisions across reruns
+    unique_date = f"2027-{(int(time.time())%12)+1:02d}-{(int(time.time())%25)+1:02d}"
+    payload = {"facility_id": fid, "court_number": 1, "date": unique_date, "slot": "18:00-19:00", "duration_min": 60}
     r = api_client.post(f"{base_url}/api/bookings", json=payload, headers=auth_headers)
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     data = r.json()
     assert data["status"] == "confirmed"
     assert data["payment"]["status"] == "paid"

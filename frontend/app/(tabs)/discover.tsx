@@ -129,7 +129,7 @@ export default function Discover() {
             <>
               <Text style={styles.sectionH}>Coaches</Text>
               {filterByQ(coaches).map((c) => (
-                <View key={c.id} style={styles.coachCard} testID={`discover-coach-${c.id}`}>
+                <Pressable key={c.id} style={styles.coachCard} testID={`discover-coach-${c.id}`} onPress={() => router.push(`/coach/${c.id}`)}>
                   <Image source={{ uri: c.avatar }} style={styles.coachAvatar} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.coachName}>{c.name}</Text>
@@ -137,7 +137,8 @@ export default function Discover() {
                     <Text style={styles.coachBio} numberOfLines={2}>{c.bio}</Text>
                     <Text style={styles.coachPrice}>₹{c.price_per_session}/session</Text>
                   </View>
-                </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceMuted} />
+                </Pressable>
               ))}
             </>
           )}
