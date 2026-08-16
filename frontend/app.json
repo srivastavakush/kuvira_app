@@ -10,7 +10,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.kuvirasportsapp.zwrxyl"
+      "bundleIdentifier": "com.emergent.kuvirasportsapp.zwrxyl",
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "adaptiveIcon": {
