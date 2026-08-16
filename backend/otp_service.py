@@ -1,10 +1,11 @@
-"""OTP service — environment-gated. Development uses a mock code; production
-requires a real SMS provider (Twilio Verify). Includes in-memory rate limiting
-and attempt caps (note: for multi-instance production, back this with Redis).
+"""Phone verification abstraction for Kuvira.
+
+Development can keep using the deterministic mock OTP. Production can use
+Firebase phone authentication: the mobile app verifies the SMS with Firebase
+and sends the resulting Firebase ID token here for server-side verification.
 """
 import time
-import hashlib
-from typing import Dict, Tuple
+from typing import Dict
 
 from deps import (
     OTP_PROVIDER, IS_PROD, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
@@ -13,12 +14,11 @@ from deps import (
 
 MOCK_OTP = "123456"
 
-# --- simple in-memory limiters (per-process) --------------------------------
-_send_log: Dict[str, list] = {}      # mobile -> [timestamps]
-_verify_attempts: Dict[str, int] = {}  # mobile -> attempts since last send
+_send_log: Dict[str, list] = {}
+_verify_attempts: Dict[str, int] = {}
 SEND_WINDOW_SEC = 3600
-SEND_MAX = 5           # max OTP sends per hour per mobile
-VERIFY_MAX = 5         # max verify attempts per issued OTP
+SEND_MAX = 5
+VERIFY_MAX = 5
 
 
 def _now() -> float:
@@ -46,19 +46,28 @@ def _twilio_client():
 
 
 async def send_otp(mobile: str) -> dict:
-    """Return dict with `sent` and, in non-prod, a `demo_otp` hint."""
+    """Legacy server-side OTP start for Twilio/mock compatibility.
+
+    The Firebase production client sends the SMS itself, so the mobile app does
+    not call this endpoint when OTP_PROVIDER=firebase.
+    """
     check_send_rate(mobile)
+    if OTP_PROVIDER == "firebase":
+        return {"sent": True, "provider": "firebase"}
+
     if OTP_PROVIDER == "twilio":
         if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_VERIFY_SERVICE):
             raise KuviraError(500, "OTP_PROVIDER_MISCONFIGURED", "OTP provider not configured")
         try:
             client = _twilio_client()
-            client.verify.v2.services(TWILIO_VERIFY_SERVICE).verifications.create(to=mobile, channel="sms")
+            client.verify.v2.services(TWILIO_VERIFY_SERVICE).verifications.create(
+                to=mobile, channel="sms"
+            )
         except Exception:
             log.exception("Twilio send_otp failed")
             raise KuviraError(502, "OTP_SEND_FAILED", "Could not send OTP. Please try again.")
         return {"sent": True}
-    # mock provider (development / staging)
+
     if IS_PROD:
         raise KuviraError(500, "OTP_PROVIDER_MISCONFIGURED", "Mock OTP is disabled in production")
     return {"sent": True, "demo_otp": MOCK_OTP}
@@ -66,15 +75,27 @@ async def send_otp(mobile: str) -> dict:
 
 async def verify_otp(mobile: str, code: str) -> bool:
     register_attempt(mobile)
+
+    if OTP_PROVIDER == "firebase":
+        from firebase_auth import verify_id_token
+
+        decoded = verify_id_token(code)
+        verified_phone = decoded.get("phone_number")
+        if verified_phone != mobile:
+            raise KuviraError(401, "PHONE_MISMATCH", "Firebase phone number does not match the login number")
+        return True
+
     if OTP_PROVIDER == "twilio":
         try:
             client = _twilio_client()
-            check = client.verify.v2.services(TWILIO_VERIFY_SERVICE).verification_checks.create(to=mobile, code=code)
+            check = client.verify.v2.services(TWILIO_VERIFY_SERVICE).verification_checks.create(
+                to=mobile, code=code
+            )
             return check.status == "approved"
         except Exception:
             log.exception("Twilio verify_otp failed")
             raise KuviraError(502, "OTP_VERIFY_FAILED", "Could not verify OTP. Please try again.")
-    # mock
+
     if IS_PROD:
         raise KuviraError(500, "OTP_PROVIDER_MISCONFIGURED", "Mock OTP is disabled in production")
     return code == MOCK_OTP
