@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
+import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, font, radius, HERO_IMAGES } from '@/src/theme';
 import { Button } from '@/src/components/ui';
-import { api } from '@/src/api';
+import { startPhoneVerification, normalizeIndianPhone } from '@/src/firebase';
 
 export default function Login() {
   const router = useRouter();
@@ -15,13 +15,17 @@ export default function Login() {
   const [err, setErr] = useState<string | null>(null);
 
   async function submit() {
-    if (mobile.trim().length < 6) { setErr('Enter a valid mobile number'); return; }
-    setLoading(true); setErr(null);
     try {
-      await api.otpStart(mobile.trim());
-      router.push({ pathname: '/(auth)/otp', params: { mobile: mobile.trim() } });
-    } catch (e: any) { setErr(e.message || 'Failed to send OTP'); }
-    finally { setLoading(false); }
+      const phone = normalizeIndianPhone(mobile.trim());
+      setLoading(true);
+      setErr(null);
+      await startPhoneVerification(phone);
+      router.push({ pathname: '/(auth)/otp', params: { mobile: phone } });
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to send OTP');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
