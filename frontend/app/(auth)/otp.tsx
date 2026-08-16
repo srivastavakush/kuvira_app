@@ -5,24 +5,44 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing, font, radius } from '@/src/theme';
 import { Button } from '@/src/components/ui';
 import { api, setToken } from '@/src/api';
+import { confirmPhoneVerification, resendPhoneVerification } from '@/src/firebase';
 
 export default function OTP() {
   const router = useRouter();
   const { mobile } = useLocalSearchParams<{ mobile: string }>();
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function verify() {
     if (otp.length !== 6) { setErr('Enter 6-digit OTP'); return; }
     setLoading(true); setErr(null);
     try {
-      const res: any = await api.otpVerify(String(mobile), otp);
+      const { idToken, phoneNumber } = await confirmPhoneVerification(otp);
+      const expected = String(mobile);
+      if (phoneNumber !== expected) throw new Error('Phone number mismatch. Please restart login.');
+      const res: any = await api.otpVerify(expected, idToken);
       await setToken(res.token);
       if (!res.user.onboarded) router.replace('/(auth)/onboarding');
       else router.replace('/(tabs)/home');
-    } catch (e: any) { setErr(e.message || 'Invalid OTP'); }
-    finally { setLoading(false); }
+    } catch (e: any) {
+      setErr(e?.message || 'Invalid or expired OTP');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function resend() {
+    setResending(true); setErr(null);
+    try {
+      await resendPhoneVerification(String(mobile));
+      setOtp('');
+    } catch (e: any) {
+      setErr(e?.message || 'Failed to resend OTP');
+    } finally {
+      setResending(false);
+    }
   }
 
   return (
@@ -33,7 +53,7 @@ export default function OTP() {
         </Pressable>
         <View style={styles.body}>
           <Text style={styles.headline}>Enter OTP</Text>
-          <Text style={styles.sub}>Sent to +91 {mobile}. For demo, use <Text style={{ color: colors.brandPrimary, fontWeight: '700' }}>123456</Text>.</Text>
+          <Text style={styles.sub}>We sent a verification code to {mobile}.</Text>
           <TextInput
             testID="otp-input"
             value={otp}
@@ -47,11 +67,15 @@ export default function OTP() {
           {err ? <Text style={styles.err} testID="otp-error">{err}</Text> : null}
           <View style={{ height: spacing.xl }} />
           <Button label="Verify & Continue" onPress={verify} loading={loading} testID="otp-verify-button" />
+          <Pressable onPress={resend} disabled={resending} style={styles.resend}>
+            <Text style={styles.resendText}>{resending ? 'Sending…' : 'Resend OTP'}</Text>
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
+
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.surface },
   backBtn: { padding: spacing.lg },
@@ -64,4 +88,6 @@ const styles = StyleSheet.create({
     textAlign: 'center', letterSpacing: 12, paddingVertical: spacing.lg,
   },
   err: { color: colors.error, marginTop: spacing.md, fontSize: font.sizes.sm },
+  resend: { alignItems: 'center', marginTop: spacing.lg, padding: spacing.sm },
+  resendText: { color: colors.brandPrimary, fontWeight: '700', fontSize: font.sizes.base },
 });
