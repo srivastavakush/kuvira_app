@@ -3,8 +3,13 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json yarn.lock* package-lock.json* ./
-RUN if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else npm install; fi
+# Copy manifest first for better Docker layer caching.
+COPY package.json ./
+
+# The repository has a local-development command guard as an npm lifecycle
+# hook. Cloud Build installs the already-declared dependencies directly;
+# Expo's web bundle does not require that hook to run.
+RUN npm install --ignore-scripts
 
 COPY . .
 
@@ -14,7 +19,7 @@ RUN npx expo export --platform web
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Expo Router needs SPA fallback for client-side routes
+# Expo Router needs SPA fallback for client-side routes.
 RUN printf '%s\n' \
   'server {' \
   '  listen 8080;' \
