@@ -19,5 +19,6 @@ COPY . .
 ENV PORT=8001
 EXPOSE 8001
 
-# Graceful shutdown handled by uvicorn; single worker + async is ideal for Cloud Run
-CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT} --timeout-graceful-shutdown 20"]
+# Run a safe Atlas diagnostic inside the exact Cloud Run runtime before uvicorn.
+# The diagnostic never prints MONGO_URL/credentials and never blocks startup.
+CMD ["sh", "-c", "python /app/mongo_diagnostic.py; exec uvicorn server:app --host 0.0.0.0 --port ${PORT} --timeout-graceful-shutdown 20"]
