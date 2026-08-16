@@ -9,7 +9,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@expo/metro-runtime": "6.1.2",
@@ -63,7 +64,6 @@
     "tar": "7.5.19",
     "**/@eslint/eslintrc/js-yaml": "4.3.0",
     "**/@expo/xcpretty/js-yaml": "4.3.0",
-    "**/@istanbuljs/eslint-plugin": "3.0.0",
     "shell-quote": "1.9.0"
   },
   "private": true,
