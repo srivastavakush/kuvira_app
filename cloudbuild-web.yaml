@@ -1,0 +1,37 @@
+# Google Cloud Build — build, push and deploy the Kuvira Expo web frontend.
+substitutions:
+  _REGION: asia-south1
+  _REPO: kuvira
+  _SERVICE: kuvira-web
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$BUILD_ID
+      - frontend
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$BUILD_ID
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$BUILD_ID
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --cpu=1
+      - --memory=512Mi
+      - --concurrency=80
+      - --timeout=60
+      - --min-instances=0
+      - --max-instances=10
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$BUILD_ID
+options:
+  logging: CLOUD_LOGGING_ONLY
