@@ -54,5 +54,7 @@ jobs:
         with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
       - uses: google-github-actions/setup-gcloud@v2
         with: { project_id: '${{ secrets.GCP_PROJECT }}' }
-      - name: Cloud Build deploy
+      - name: Deploy backend
         run: gcloud builds submit --config cloudbuild.yaml .
+      - name: Deploy frontend
+        run: gcloud builds submit --config cloudbuild-web.yaml .
