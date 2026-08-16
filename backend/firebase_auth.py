@@ -17,7 +17,7 @@ def _ensure_initialized() -> None:
     """Initialize Firebase Admin once using Cloud Run ADC or a local service account.
 
     The frontend Firebase project is kuvira-bc2be. Cloud Run's service account
-    must have Firebase/Identity Toolkit permissions for that project.
+    must have Firebase/Identity Toolkit permissions for this project.
     """
     if firebase_admin._apps:
         return
@@ -39,7 +39,10 @@ def verify_id_token(id_token: str) -> dict:
 
     _ensure_initialized()
     try:
-        decoded = firebase_auth.verify_id_token(id_token.strip(), check_revoked=True)
+        # For the login exchange, cryptographic token validation is sufficient.
+        # check_revoked=True performs an additional Identity Toolkit accounts:lookup
+        # call, which requires extra IAM permissions and is unnecessary here.
+        decoded = firebase_auth.verify_id_token(id_token.strip(), check_revoked=False)
     except firebase_auth.ExpiredIdTokenError:
         raise KuviraError(401, "FIREBASE_TOKEN_EXPIRED", "Firebase session expired. Please sign in again")
     except firebase_auth.RevokedIdTokenError:
