@@ -1,4 +1,4 @@
-// Entry — routes to (auth)/login or (tabs)/home based on session + onboarding.
+// Entry — home is public; authentication is requested only for protected actions.
 import { useEffect } from 'react';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -7,14 +7,11 @@ import { colors, font, spacing } from '@/src/theme';
 
 export default function Index() {
   const router = useRouter();
-  const { user, loading } = useSession();
+  const { loading } = useSession();
 
   useEffect(() => {
-    if (loading) return;
-    if (!user) router.replace('/(auth)/login');
-    else if (!user.onboarded) router.replace('/(auth)/onboarding');
-    else router.replace('/(tabs)/home');
-  }, [user, loading, router]);
+    if (!loading) router.replace('/(tabs)/home');
+  }, [loading, router]);
 
   return (
     <View style={styles.wrap} testID="splash-screen">
