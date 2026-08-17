@@ -1,7 +1,5 @@
-import { Router } from 'expo-router';
-
-export function requireAuth(user: unknown, router: Router, destination = '/(auth)/login') {
+export function requireAuth(user: unknown, router: any, destination = '/(auth)/login') {
   if (user) return true;
-  router.push(destination as any);
+  router.push(destination);
   return false;
 }
