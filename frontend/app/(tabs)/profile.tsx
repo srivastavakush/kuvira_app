@@ -17,19 +17,20 @@ export default function Profile() {
   const [orders, setOrders] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [orgs, setOrgs] = useState<any[]>([]);
+  const [caps, setCaps] = useState<any>(null);
 
   useEffect(() => {
     if (!user) return;
     (async () => {
       try {
-        const [ins, o, b, caps] = await Promise.all([
+        const [ins, o, b, capabilities] = await Promise.all([
           api.aiInsights().catch(() => null),
           api.myOrders().catch(() => []),
           api.myBookings().catch(() => []),
           api.capabilities().catch(() => null),
         ]);
-        setInsights(ins); setOrders(o); setBookings(b);
-        if (caps?.organizations) setOrgs(caps.organizations);
+        setInsights(ins); setOrders(o); setBookings(b); setCaps(capabilities);
+        if (capabilities?.organizations) setOrgs(capabilities.organizations);
       } catch {}
     })();
   }, [user]);
@@ -52,6 +53,7 @@ export default function Profile() {
   }
 
   const winRate = insights?.stats?.win_rate || 0;
+  const isAdmin = Boolean(caps?.is_platform_admin);
 
   return (
     <View style={styles.wrap} testID="profile-screen">
@@ -70,6 +72,17 @@ export default function Profile() {
             </View>
           </SafeAreaView>
         </View>
+
+        {isAdmin && (
+          <Pressable testID="profile-admin-dashboard" onPress={() => router.push('/admin')} style={styles.adminBanner}>
+            <View style={styles.adminIcon}><Ionicons name="shield-checkmark" size={22} color={colors.brandPrimary} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.adminTitle}>Platform Admin</Text>
+              <Text style={styles.adminSubtitle}>Manage clubs, courts, owners and platform operations</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.brandPrimary} />
+          </Pressable>
+        )}
 
         {insights && (
           <Card style={{ marginHorizontal: spacing.lg, marginTop: spacing.lg }} testID="profile-performance">
@@ -116,6 +129,10 @@ const styles = StyleSheet.create({
   statBox: { alignItems: 'center', minWidth: 74 },
   statVal: { color: colors.brandPrimary, fontSize: font.sizes.xxl, fontWeight: '900' },
   statLabel: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 },
+  adminBanner: { marginHorizontal: spacing.lg, marginTop: spacing.lg, padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandSecondary, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  adminIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
+  adminTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
+  adminSubtitle: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm, marginTop: 2 },
   cardLabel: { color: colors.brandPrimary, fontSize: font.sizes.xs, letterSpacing: 1.2, fontWeight: '700' },
   chartRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 90 },
   chartBar: { flex: 1, backgroundColor: colors.brandPrimary, borderRadius: 4, opacity: 0.85 },
