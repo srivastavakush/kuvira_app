@@ -1,5 +1,4 @@
 # Google Cloud Build — build, push to Artifact Registry, deploy to Cloud Run.
-# Trigger from GitHub on push to main (production) or a staging branch.
 substitutions:
   _REGION: asia-south1
   _REPO: kuvira
@@ -32,7 +31,7 @@ steps:
       - --timeout=60
       - --min-instances=0
       - --max-instances=10
-      - --set-env-vars=APP_ENV=production,DB_NAME=kuvira_sports,AUTH_PROVIDER=firebase,OTP_PROVIDER=firebase
+      - --set-env-vars=APP_ENV=production,DB_NAME=kuvira_sports,AUTH_PROVIDER=firebase,OTP_PROVIDER=firebase,PLATFORM_ADMIN_MOBILES=+919415054760
       - --set-secrets=JWT_SECRET=JWT_SECRET:latest,MONGO_URL=MONGO_URL:latest,EMERGENT_LLM_KEY=EMERGENT_LLM_KEY:latest
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$BUILD_ID
