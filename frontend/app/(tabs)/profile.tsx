@@ -19,6 +19,7 @@ export default function Profile() {
   const [orgs, setOrgs] = useState<any[]>([]);
 
   useEffect(() => {
+    if (!user) return;
     (async () => {
       try {
         const [ins, o, b, caps] = await Promise.all([
@@ -31,11 +32,24 @@ export default function Profile() {
         if (caps?.organizations) setOrgs(caps.organizations);
       } catch {}
     })();
-  }, []);
+  }, [user]);
 
-  async function signOut() { await clearToken(); await refresh(); router.replace('/(auth)/login'); }
+  async function signOut() { await clearToken(); await refresh(); }
 
-  if (!user) return <Loader />;
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.guestWrap} testID="profile-login-screen">
+        <View style={styles.guestIcon}>
+          <Ionicons name="person" size={36} color={colors.brandPrimary} />
+        </View>
+        <Text style={styles.guestTitle}>Your Kuvira profile</Text>
+        <Text style={styles.guestSubtitle}>Sign in to manage your games, bookings, orders and personalized sports experience.</Text>
+        <Pressable testID="profile-login-btn" onPress={() => router.push('/(auth)/login')} style={styles.loginBtn}>
+          <Text style={styles.loginBtnText}>Login / Sign up</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
 
   const winRate = insights?.stats?.win_rate || 0;
 
@@ -50,34 +64,17 @@ export default function Profile() {
             <Text style={styles.name}>{user.name || 'Athlete'}</Text>
             <Text style={styles.meta}>{user.city} · {user.skill_level} · Pickleball</Text>
             <View style={styles.statsRow}>
-              <View style={styles.statBox}>
-                <Text style={styles.statVal}>{insights?.stats?.matches_played ?? 0}</Text>
-                <Text style={styles.statLabel}>Matches</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statVal}>{winRate}%</Text>
-                <Text style={styles.statLabel}>Win Rate</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statVal}>{insights?.performance_score ?? '—'}</Text>
-                <Text style={styles.statLabel}>Score</Text>
-              </View>
+              <View style={styles.statBox}><Text style={styles.statVal}>{insights?.stats?.matches_played ?? 0}</Text><Text style={styles.statLabel}>Matches</Text></View>
+              <View style={styles.statBox}><Text style={styles.statVal}>{winRate}%</Text><Text style={styles.statLabel}>Win Rate</Text></View>
+              <View style={styles.statBox}><Text style={styles.statVal}>{insights?.performance_score ?? '—'}</Text><Text style={styles.statLabel}>Score</Text></View>
             </View>
           </SafeAreaView>
         </View>
 
-        {/* Performance card */}
         {insights && (
           <Card style={{ marginHorizontal: spacing.lg, marginTop: spacing.lg }} testID="profile-performance">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.sm }}>
-              <Ionicons name="stats-chart" size={16} color={colors.brandPrimary} />
-              <Text style={styles.cardLabel}>PERFORMANCE</Text>
-            </View>
-            <View style={styles.chartRow}>
-              {insights.chart.map((v: number, i: number) => (
-                <View key={i} style={[styles.chartBar, { height: 6 + v }]} />
-              ))}
-            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: spacing.sm }}><Ionicons name="stats-chart" size={16} color={colors.brandPrimary} /><Text style={styles.cardLabel}>PERFORMANCE</Text></View>
+            <View style={styles.chartRow}>{insights.chart.map((v: number, i: number) => <View key={i} style={[styles.chartBar, { height: 6 + v }]} />)}</View>
             <View style={{ marginTop: spacing.md, gap: 6 }}>
               <Text style={styles.perfLine}><Text style={{ color: colors.brandPrimary }}>▲</Text> Strongest: <Text style={{ color: colors.onSurface, fontWeight: '700' }}>{insights.strongest}</Text></Text>
               <Text style={styles.perfLine}><Text style={{ color: colors.warning }}>△</Text> Improve: <Text style={{ color: colors.onSurface, fontWeight: '700' }}>{insights.needs_improvement}</Text></Text>
@@ -87,55 +84,17 @@ export default function Profile() {
         )}
 
         <Card style={{ marginHorizontal: spacing.lg, marginTop: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
-          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center' }}>
-            <Ionicons name="sparkles" size={22} color={colors.brandPrimary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '700' }}>Talk to AI Coach</Text>
-            <Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 2 }}>Personalized training & insights</Text>
-          </View>
-          <Pressable testID="profile-open-ai" onPress={() => router.push('/ai-coach')} style={styles.miniBtn}>
-            <Text style={styles.miniBtnText}>Open</Text>
-          </Pressable>
+          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="sparkles" size={22} color={colors.brandPrimary} /></View>
+          <View style={{ flex: 1 }}><Text style={{ color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '700' }}>Talk to AI Coach</Text><Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 2 }}>Personalized training & insights</Text></View>
+          <Pressable testID="profile-open-ai" onPress={() => router.push('/ai-coach')} style={styles.miniBtn}><Text style={styles.miniBtnText}>Open</Text></Pressable>
         </Card>
 
-        {/* Manage Club (only if user has an org membership — backend-determined) */}
-        {orgs.length > 0 && (
-          <View style={{ marginTop: spacing.md, paddingHorizontal: spacing.lg }}>
-            <Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.sm, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', marginBottom: spacing.sm }}>Workspaces</Text>
-            {orgs.map((o: any) => (
-              <Pressable key={o.org_id} testID={`profile-club-${o.org_id}`} style={styles.menuRow} onPress={() => router.push(`/club/${o.org_id}`)}>
-                <Ionicons name="business" size={20} color={colors.brandPrimary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.menuLabel}>{o.name}</Text>
-                  <Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.xs }}>{o.role.replace('CLUB_', '').replace('_', ' ')}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceMuted} />
-              </Pressable>
-            ))}
-          </View>
-        )}
+        {orgs.length > 0 && <View style={{ marginTop: spacing.md, paddingHorizontal: spacing.lg }}><Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.sm, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', marginBottom: spacing.sm }}>Workspaces</Text>{orgs.map((o: any) => <Pressable key={o.org_id} testID={`profile-club-${o.org_id}`} style={styles.menuRow} onPress={() => router.push(`/club/${o.org_id}`)}><Ionicons name="business" size={20} color={colors.brandPrimary} /><View style={{ flex: 1 }}><Text style={styles.menuLabel}>{o.name}</Text><Text style={{ color: colors.onSurfaceMuted, fontSize: font.sizes.xs }}>{o.role.replace('CLUB_', '').replace('_', ' ')}</Text></View><Ionicons name="chevron-forward" size={18} color={colors.onSurfaceMuted} /></Pressable>)}</View>}
 
-        {/* Menu */}
         <View style={{ marginTop: spacing.xl, paddingHorizontal: spacing.lg }}>
-          {[
-            { key: 'training', label: 'Training Plans', icon: 'barbell', to: '/training' },
-            { key: 'rankings', label: 'Rankings & Badges', icon: 'trophy', to: '/rankings' },
-            { key: 'refer', label: 'Refer & Earn', icon: 'gift', to: '/refer' },
-            { key: 'bookings', label: `My Bookings (${bookings.length})`, icon: 'calendar', to: '/(tabs)/play' },
-            { key: 'orders', label: `My Orders (${orders.length})`, icon: 'bag', to: '/marketplace' },
-          ].map((it) => (
-            <Pressable key={it.key} testID={`profile-menu-${it.key}`} style={styles.menuRow} onPress={() => router.push(it.to as any)}>
-              <Ionicons name={it.icon as any} size={20} color={colors.onSurfaceSecondary} />
-              <Text style={styles.menuLabel}>{it.label}</Text>
-              <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceMuted} />
-            </Pressable>
-          ))}
+          {[{ key: 'training', label: 'Training Plans', icon: 'barbell', to: '/training' }, { key: 'rankings', label: 'Rankings & Badges', icon: 'trophy', to: '/rankings' }, { key: 'refer', label: 'Refer & Earn', icon: 'gift', to: '/refer' }, { key: 'bookings', label: `My Bookings (${bookings.length})`, icon: 'calendar', to: '/(tabs)/play' }, { key: 'orders', label: `My Orders (${orders.length})`, icon: 'bag', to: '/marketplace' }].map((it) => <Pressable key={it.key} testID={`profile-menu-${it.key}`} style={styles.menuRow} onPress={() => router.push(it.to as any)}><Ionicons name={it.icon as any} size={20} color={colors.onSurfaceSecondary} /><Text style={styles.menuLabel}>{it.label}</Text><Ionicons name="chevron-forward" size={18} color={colors.onSurfaceMuted} /></Pressable>)}
         </View>
-
-        <Pressable testID="profile-signout" onPress={signOut} style={styles.signOut}>
-          <Text style={styles.signOutText}>Sign out</Text>
-        </Pressable>
+        <Pressable testID="profile-signout" onPress={signOut} style={styles.signOut}><Text style={styles.signOutText}>Sign out</Text></Pressable>
       </ScrollView>
     </View>
   );
@@ -143,6 +102,12 @@ export default function Profile() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.surface },
+  guestWrap: { flex: 1, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  guestIcon: { width: 76, height: 76, borderRadius: 38, backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
+  guestTitle: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '900', textAlign: 'center' },
+  guestSubtitle: { color: colors.onSurfaceMuted, fontSize: font.sizes.base, lineHeight: 22, textAlign: 'center', marginTop: spacing.sm, maxWidth: 420 },
+  loginBtn: { marginTop: spacing.xl, backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.xxl, paddingVertical: spacing.md, borderRadius: radius.pill },
+  loginBtnText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
   header: { height: 300, backgroundColor: colors.surfaceSecondary },
   avatar: { width: 108, height: 108, borderRadius: 54, borderWidth: 3, borderColor: colors.brandPrimary, backgroundColor: colors.surfaceTertiary, marginBottom: spacing.md },
   name: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900' },
