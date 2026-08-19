@@ -88,12 +88,43 @@ export const api = {
   createOrder: (address: any) => request('/orders', { method: 'POST', body: JSON.stringify({ address }) }),
   myOrders: () => request('/orders/mine'),
 
-  // AI
+  // AI Coach (legacy compat)
   aiChat: (text: string, session_id?: string) =>
     request('/ai/coach/chat', { method: 'POST', body: JSON.stringify({ text, session_id }) }),
   aiHistory: (session_id?: string) => request(`/ai/coach/history${session_id ? '?session_id=' + session_id : ''}`),
   aiInsights: () => request('/ai/insights'),
   aiRecommendations: () => request('/ai/recommendations'),
+
+  // AI Coach v2 — video-first, grounded
+  aiCoach: {
+    createMatch: (payload: any) => request('/ai-coach/matches', { method: 'POST', body: JSON.stringify(payload) }),
+    listMatches: () => request('/ai-coach/matches'),
+    uploadVideo: async (fileUri: string, matchId?: string, fileName = 'match.mp4', mimeType = 'video/mp4') => {
+      const form = new FormData();
+      // React Native FormData file object
+      form.append('file', { uri: fileUri, name: fileName, type: mimeType } as any);
+      if (matchId) form.append('match_id', matchId);
+      const token = await getToken();
+      const res = await fetch(`${BASE}/api/ai-coach/videos`, {
+        method: 'POST',
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: form as any,
+      });
+      const text = await res.text();
+      let data: any = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+      if (!res.ok) throw new Error((data && (data.error?.message || data.detail)) || `HTTP ${res.status}`);
+      return data;
+    },
+    startAnalysis: (match_id: string, video_id: string) =>
+      request('/ai-coach/analyze', { method: 'POST', body: JSON.stringify({ match_id, video_id }) }),
+    analysisStatus: (job_id: string) => request(`/ai-coach/analysis/${job_id}`),
+    matchReport: (match_id: string, refresh = false) => request(`/ai-coach/match/${match_id}/report${refresh ? '?refresh=true' : ''}`),
+    playerPerformance: () => request('/ai-coach/player-performance'),
+    chat: (text: string, opts: { session_id?: string; match_id?: string } = {}) =>
+      request('/ai-coach/chat', { method: 'POST', body: JSON.stringify({ text, ...opts }) }),
+    history: (session_id?: string) => request(`/ai-coach/history${session_id ? '?session_id=' + session_id : ''}`),
+    seedKnowledge: () => request('/ai-coach/knowledge/seed', { method: 'POST' }),
+  },
 
   // Capabilities / workspace
   capabilities: () => request('/capabilities'),

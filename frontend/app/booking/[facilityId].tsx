@@ -2,18 +2,13 @@ import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, font, radius } from '@/src/theme';
-import { Loader } from '@/src/components/ui';
+import { c, spacing, font, radius } from '@/src/theme';
+import { Loader, ScreenHeader, Button, SuccessMark } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 function nextDates(n: number) {
   const out = [];
-  for (let i = 0; i < n; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    out.push(d);
-  }
+  for (let i = 0; i < n; i++) { const d = new Date(); d.setDate(d.getDate() + i); out.push(d); }
   return out;
 }
 
@@ -48,14 +43,14 @@ export default function Booking() {
     } finally { setBooking(false); }
   }
 
-  if (!facility || !avail) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
+  if (!facility || !avail) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}><Loader /></SafeAreaView>;
 
   if (confirmed) {
     return (
-      <SafeAreaView style={styles.wrap} testID="booking-confirmed">
+      <SafeAreaView style={styles.wrap} edges={['top']} testID="booking-confirmed">
         <View style={styles.confirmWrap}>
-          <View style={styles.checkCircle}><Ionicons name="checkmark" size={48} color={colors.onBrandPrimary} /></View>
-          <Text style={styles.confirmTitle}>Booking Confirmed!</Text>
+          <SuccessMark />
+          <Text style={styles.confirmTitle}>Booking confirmed</Text>
           <Text style={styles.confirmSub}>{facility.name}</Text>
           <View style={styles.confirmCard}>
             <Row label="Date" value={new Date(confirmed.date).toDateString()} />
@@ -63,43 +58,53 @@ export default function Booking() {
             <Row label="Court" value={`Court ${confirmed.court_number}`} />
             <Row label="Paid" value={`₹${confirmed.price} · PayU`} />
           </View>
-          <Pressable testID="booking-done" style={styles.doneBtn} onPress={() => router.replace('/(tabs)/play')}>
-            <Text style={styles.doneBtnText}>View My Bookings</Text>
-          </Pressable>
+          <View style={{ alignSelf: 'stretch', marginTop: spacing.xl, maxWidth: 340 }}>
+            <Button label="View my bookings" onPress={() => router.replace('/(tabs)/play')} testID="booking-done" />
+          </View>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.wrap} testID="booking-screen">
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} testID="booking-back"><Ionicons name="chevron-back" size={26} color={colors.onSurface} /></Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{facility.name}</Text>
-        <View style={{ width: 26 }} />
-      </View>
+    <SafeAreaView style={styles.wrap} edges={['top']} testID="booking-screen">
+      <ScreenHeader title={facility.name} onBack={() => router.back()} testID="booking" />
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }}>
-        <Text style={styles.label}>Select Date</Text>
+      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}>
+        <Text style={styles.label}>Date</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
           {dates.map((d, i) => (
-            <Pressable key={i} testID={`booking-date-${i}`} onPress={() => setDateIdx(i)} style={[styles.dateCard, i === dateIdx && styles.dateCardActive]}>
-              <Text style={[styles.dateDow, i === dateIdx && styles.textActive]}>{d.toLocaleString('en', { weekday: 'short' })}</Text>
+            <Pressable
+              key={i}
+              testID={`booking-date-${i}`}
+              onPress={() => setDateIdx(i)}
+              style={[styles.dateCard, i === dateIdx && styles.dateCardActive]}
+            >
+              <Text style={[styles.dateDow, i === dateIdx && styles.textActive]}>
+                {d.toLocaleString('en', { weekday: 'short' })}
+              </Text>
               <Text style={[styles.dateNum, i === dateIdx && styles.textActive]}>{d.getDate()}</Text>
             </Pressable>
           ))}
         </ScrollView>
 
-        <Text style={styles.label}>Select Court</Text>
+        <Text style={styles.label}>Court</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
-          {avail.courts.map((c: any) => (
-            <Pressable key={c.court_number} testID={`booking-court-${c.court_number}`} onPress={() => setCourt(c.court_number)} style={[styles.courtChip, court === c.court_number && styles.courtChipActive]}>
-              <Text style={[styles.courtChipText, court === c.court_number && styles.textActive]}>Court {c.court_number}</Text>
+          {avail.courts.map((cc: any) => (
+            <Pressable
+              key={cc.court_number}
+              testID={`booking-court-${cc.court_number}`}
+              onPress={() => setCourt(cc.court_number)}
+              style={[styles.courtChip, court === cc.court_number && styles.courtChipActive]}
+            >
+              <Text style={[styles.courtChipText, court === cc.court_number && styles.textActive]}>
+                Court {cc.court_number}
+              </Text>
             </Pressable>
           ))}
         </ScrollView>
 
-        <Text style={styles.label}>Select Time Slot</Text>
+        <Text style={styles.label}>Time</Text>
         <View style={styles.slotGrid}>
           {courtData?.slots.map((s: any) => {
             const active = selectedSlot === s.slot;
@@ -111,7 +116,9 @@ export default function Booking() {
                 onPress={() => setSelectedSlot(s.slot)}
                 style={[styles.slot, active && styles.slotActive, !s.available && styles.slotDisabled]}
               >
-                <Text style={[styles.slotText, active && styles.textActive, !s.available && styles.slotTextDisabled]}>{s.slot.split('-')[0]}</Text>
+                <Text style={[styles.slotText, active && styles.textActive, !s.available && styles.slotTextDisabled]}>
+                  {s.slot.split('-')[0]}
+                </Text>
               </Pressable>
             );
           })}
@@ -123,9 +130,16 @@ export default function Booking() {
           <Text style={styles.footerPrice}>₹{facility.price_per_hour}</Text>
           <Text style={styles.footerSub}>{selectedSlot ? `${selectedSlot} · Court ${court}` : 'Select a slot'}</Text>
         </View>
-        <Pressable testID="booking-confirm-btn" disabled={!selectedSlot || booking} style={[styles.confirmBtn, (!selectedSlot || booking) && { opacity: 0.5 }]} onPress={confirm}>
-          <Text style={styles.confirmBtnText}>{booking ? 'Processing…' : 'Confirm & Pay'}</Text>
-        </Pressable>
+        <View style={{ minWidth: 160 }}>
+          <Button
+            label={booking ? 'Processing…' : 'Confirm & pay'}
+            testID="booking-confirm-btn"
+            disabled={!selectedSlot || booking}
+            onPress={confirm}
+            fullWidth={false}
+            style={{ paddingHorizontal: spacing.xl }}
+          />
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -141,37 +155,30 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.surface },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
-  headerTitle: { flex: 1, color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '700', textAlign: 'center', marginHorizontal: spacing.sm },
-  label: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', marginTop: spacing.xl, marginBottom: spacing.md },
-  dateCard: { width: 60, height: 70, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
-  dateCardActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  dateDow: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase' },
-  dateNum: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '900', marginTop: 2 },
-  textActive: { color: colors.onBrandPrimary },
-  courtChip: { paddingHorizontal: spacing.lg, height: 44, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
-  courtChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  courtChipText: { color: colors.onSurface, fontWeight: '700' },
+  wrap: { flex: 1, backgroundColor: c.bg },
+  label: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: font.weights.semibold, marginTop: spacing.xl, marginBottom: spacing.md },
+  dateCard: { width: 56, height: 68, borderRadius: radius.md, backgroundColor: c.bgElevated, alignItems: 'center', justifyContent: 'center' },
+  dateCardActive: { backgroundColor: c.text },
+  dateDow: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 0.5 },
+  dateNum: { color: c.text, fontSize: font.sizes.xl, fontWeight: font.weights.heavy, marginTop: 2 },
+  textActive: { color: c.bg },
+  courtChip: { paddingHorizontal: spacing.lg, height: 40, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: c.bgElevated },
+  courtChipActive: { backgroundColor: c.text },
+  courtChipText: { color: c.text, fontWeight: font.weights.semibold, fontSize: font.sizes.sm },
   slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  slot: { width: '22%', paddingVertical: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
-  slotActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  slot: { width: '22%', paddingVertical: spacing.md, borderRadius: radius.sm, backgroundColor: c.bgElevated, alignItems: 'center' },
+  slotActive: { backgroundColor: c.text },
   slotDisabled: { opacity: 0.3 },
-  slotText: { color: colors.onSurface, fontWeight: '700', fontSize: font.sizes.sm },
-  slotTextDisabled: { color: colors.onSurfaceMuted },
-  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
-  footerPrice: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '900' },
-  footerSub: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs },
-  confirmBtn: { backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.pill },
-  confirmBtnText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
+  slotText: { color: c.text, fontWeight: font.weights.semibold, fontSize: font.sizes.sm },
+  slotTextDisabled: { color: c.textFaint },
+  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: c.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.divider },
+  footerPrice: { color: c.text, fontSize: font.sizes.xl, fontWeight: font.weights.heavy },
+  footerSub: { color: c.textMuted, fontSize: font.sizes.xs, marginTop: 2 },
   confirmWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  checkCircle: { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.brandPrimary, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
-  confirmTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900' },
-  confirmSub: { color: colors.onSurfaceSecondary, fontSize: font.sizes.lg, marginTop: 4 },
-  confirmCard: { alignSelf: 'stretch', backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.xl, borderWidth: 1, borderColor: colors.border },
+  confirmTitle: { color: c.text, fontSize: font.sizes.xxl, fontWeight: font.weights.heavy, marginTop: spacing.lg, letterSpacing: -0.3 },
+  confirmSub: { color: c.textMuted, fontSize: font.sizes.base, marginTop: 4 },
+  confirmCard: { alignSelf: 'stretch', backgroundColor: c.bgElevated, borderRadius: radius.md, padding: spacing.lg, marginTop: spacing.xl, maxWidth: 400 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm },
-  rowLabel: { color: colors.onSurfaceMuted, fontSize: font.sizes.base },
-  rowValue: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
-  doneBtn: { alignSelf: 'stretch', backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center', marginTop: spacing.xl },
-  doneBtnText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
+  rowLabel: { color: c.textMuted, fontSize: font.sizes.sm },
+  rowValue: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
 });

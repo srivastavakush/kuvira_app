@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, font, radius } from '@/src/theme';
-import { Loader } from '@/src/components/ui';
+import { Loader, SuccessMark, Button } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 function nextDates(n: number) {
@@ -42,10 +42,12 @@ export default function CoachDetail() {
     return (
       <SafeAreaView style={styles.wrap} testID="coach-session-confirmed">
         <View style={styles.confirmWrap}>
-          <View style={styles.check}><Ionicons name="checkmark" size={44} color={colors.onBrandPrimary} /></View>
-          <Text style={styles.cTitle}>Session Booked!</Text>
+          <SuccessMark />
+          <Text style={styles.cTitle}>Session booked</Text>
           <Text style={styles.cSub}>{coach.name} · {new Date(confirmed.date).toDateString()} · {confirmed.slot}</Text>
-          <Pressable testID="coach-done" style={styles.doneBtn} onPress={() => router.replace('/(tabs)/profile')}><Text style={styles.doneText}>View Schedule</Text></Pressable>
+          <View style={{ alignSelf: 'stretch', marginTop: spacing.xl, maxWidth: 340 }}>
+            <Button label="View schedule" onPress={() => router.replace('/(tabs)/profile')} testID="coach-done" />
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -63,7 +65,7 @@ export default function CoachDetail() {
           <View style={styles.heroBottom}>
             <Image source={{ uri: coach.avatar }} style={styles.avatar} />
             <Text style={styles.name}>{coach.name}</Text>
-            <Text style={styles.meta}>⭐ {coach.rating} · {coach.experience_years} yrs · {coach.city}</Text>
+            <Text style={styles.meta}><Ionicons name="star" size={12} color={colors.onSurfaceSecondary} /> {coach.rating} · {coach.experience_years} yrs · {coach.city}</Text>
           </View>
         </View>
 
@@ -135,9 +137,6 @@ const styles = StyleSheet.create({
   bookBtn: { backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.pill },
   bookText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
   confirmWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  check: { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.brandPrimary, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
-  cTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900' },
-  cSub: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: 6, textAlign: 'center' },
-  doneBtn: { alignSelf: 'stretch', backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center', marginTop: spacing.xl },
-  doneText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
+  cTitle: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', marginTop: spacing.lg, letterSpacing: -0.3 },
+  cSub: { color: colors.onSurfaceMuted, fontSize: font.sizes.base, marginTop: 6, textAlign: 'center' },
 });

@@ -2,14 +2,27 @@ import { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, font, radius, HERO_IMAGES } from '@/src/theme';
-import { SectionHeader, Card, MatchScoreBadge, Loader } from '@/src/components/ui';
+import { c, spacing, font, radius } from '@/src/theme';
+import { SectionHeader, Loader, MatchScoreBadge } from '@/src/components/ui';
 import { api } from '@/src/api';
 import { useSession } from '@/src/session';
 import { requireAuth } from '@/src/auth-gate';
+
+const QUICK_ACTIONS = [
+  { key: 'book', label: 'Book Court', icon: 'calendar-outline' as const, to: '/(tabs)/discover', protected: true },
+  { key: 'coach', label: 'AI Coach', icon: 'compass-outline' as const, to: '/ai-coach', protected: false },
+  { key: 'shop', label: 'Shop', icon: 'bag-outline' as const, to: '/marketplace', protected: false },
+  { key: 'events', label: 'Events', icon: 'trophy-outline' as const, to: '/(tabs)/discover', protected: false },
+] as const;
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
 export default function Home() {
   const router = useRouter();
@@ -24,68 +37,328 @@ export default function Home() {
       api.facilities().catch(() => []),
       api.events().catch(() => []),
     ]);
-    setData({ rec, players: players.slice(0, 5), facilities: facilities.slice(0, 5), events: events.slice(0, 3) });
+    setData({
+      rec,
+      players: players.slice(0, 3),
+      facilities: facilities.slice(0, 5),
+      events: events.slice(0, 4),
+    });
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
 
-  if (!data) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
+  if (!data) return <SafeAreaView style={styles.wrap}><Loader /></SafeAreaView>;
 
   return (
-    <View style={styles.wrap} testID="home-screen">
-      <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandPrimary} />} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
-        <View style={styles.hero}>
-          <Image source={{ uri: HERO_IMAGES.home }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-          <LinearGradient colors={['rgba(10,10,10,0.4)', 'rgba(10,10,10,0.95)']} locations={[0, 1]} style={StyleSheet.absoluteFillObject} />
-          <SafeAreaView edges={['top']} style={{ flex: 1 }}>
-            <View style={styles.heroTopRow}>
-              <View><Text style={styles.heroLocation}><Ionicons name="location" size={12} color={colors.brandPrimary} /> {user?.city || 'Bangalore'}</Text><Text style={styles.heroHi}>Hey {user?.name?.split(' ')[0] || 'Athlete'} 👋</Text></View>
-              <Pressable testID="home-search-btn" onPress={() => router.push('/discover')} style={styles.iconBtn}><Ionicons name="search" size={20} color={colors.onSurface} /></Pressable>
-            </View>
-            <View style={{ flex: 1 }} />
-            <View style={styles.heroBottom}>
-              <Text style={styles.heroTitle}>Find your game.{"\n"}Own the court.</Text>
-              <Pressable testID="home-find-game-cta" onPress={() => router.push('/(tabs)/play')} style={styles.ctaBtn}><Text style={styles.ctaText}>Find a Game →</Text></Pressable>
-            </View>
-          </SafeAreaView>
+    <SafeAreaView style={styles.wrap} edges={['top']} testID="home-screen">
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.textFaint} />}
+        contentContainerStyle={{ paddingBottom: spacing.xxxl }}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.eyebrow}>
+              <Ionicons name="location-outline" size={11} color={c.textMuted} /> {user?.city || 'Bangalore'}
+            </Text>
+            <Text style={styles.greeting} numberOfLines={1}>
+              {greeting()}, {user?.name?.split(' ')[0] || 'athlete'}
+            </Text>
+          </View>
+          <Pressable
+            testID="home-search-btn"
+            onPress={() => router.push('/(tabs)/discover')}
+            style={styles.iconBtn}
+            hitSlop={8}
+          >
+            <Ionicons name="search-outline" size={20} color={c.text} />
+          </Pressable>
         </View>
 
+        {/* Insight strip — quiet, no big gold tint */}
+        <Pressable
+          testID="home-ai-insight"
+          onPress={() => router.push('/ai-coach')}
+          style={({ pressed }) => [styles.insight, pressed && { opacity: 0.75 }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.insightLabel}>Today{"\u2019"}s coaching note</Text>
+            <Text style={styles.insightText} numberOfLines={2}>{data.rec.insight}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={c.textFaint} />
+        </Pressable>
+
+        {/* Quick actions — thin outlined tiles, no gold circle */}
         <View style={styles.quickRow}>
-          {[
-            { key: 'book', label: 'Book Court', icon: 'calendar', to: '/(tabs)/discover', protected: true },
-            { key: 'coach', label: 'AI Coach', icon: 'sparkles', to: '/ai-coach', protected: false },
-            { key: 'shop', label: 'Shop', icon: 'bag', to: '/marketplace', protected: false },
-            { key: 'events', label: 'Events', icon: 'trophy', to: '/(tabs)/discover', protected: false },
-          ].map((a) => (
-            <Pressable key={a.key} testID={`home-quick-${a.key}`} style={styles.quickItem} onPress={() => {
-              if (a.protected && !requireAuth(user, router)) return;
-              router.push(a.to as any);
-            }}>
-              <View style={styles.quickIcon}><Ionicons name={a.icon as any} size={22} color={colors.brandPrimary} /></View><Text style={styles.quickLabel}>{a.label}</Text>
+          {QUICK_ACTIONS.map((a) => (
+            <Pressable
+              key={a.key}
+              testID={`home-quick-${a.key}`}
+              style={({ pressed }) => [styles.quickItem, pressed && { backgroundColor: c.bgRaised }]}
+              onPress={() => {
+                if (a.protected && !requireAuth(user, router)) return;
+                router.push(a.to as any);
+              }}
+            >
+              <Ionicons name={a.icon} size={20} color={c.text} />
+              <Text style={styles.quickLabel}>{a.label}</Text>
             </Pressable>
           ))}
         </View>
 
-        <Card style={styles.insightCard} testID="home-ai-insight"><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}><Ionicons name="sparkles" size={14} color={colors.brandPrimary} /><Text style={styles.insightLabel}>AI COACH INSIGHT</Text></View><Text style={styles.insightText}>{data.rec.insight}</Text><Pressable onPress={() => router.push('/ai-coach')} style={{ marginTop: spacing.md, alignSelf: 'flex-start' }}><Text style={{ color: colors.brandPrimary, fontWeight: '700' }}>Talk to AI Coach →</Text></Pressable></Card>
+        {/* Nearby courts */}
+        <SectionHeader title="Nearby courts" action="See all" onAction={() => router.push('/(tabs)/discover')} testID="home-nearby-header" />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>
+          {data.facilities.map((f: any) => (
+            <Pressable
+              key={f.id}
+              testID={`home-facility-${f.id}`}
+              style={styles.facCard}
+              onPress={() => router.push(`/facility/${f.id}`)}
+            >
+              <Image source={{ uri: f.image }} style={styles.facImage} contentFit="cover" />
+              <View style={styles.facBody}>
+                <Text style={styles.facName} numberOfLines={1}>{f.name}</Text>
+                <View style={styles.facMetaRow}>
+                  <Ionicons name="location-outline" size={12} color={c.textMuted} />
+                  <Text style={styles.facMeta}>{f.area}</Text>
+                  <Text style={styles.dot}>·</Text>
+                  <Ionicons name="star" size={11} color={c.textSecondary} />
+                  <Text style={styles.facMeta}>{f.rating}</Text>
+                </View>
+                <Text style={styles.facPrice}>₹{f.price_per_hour}<Text style={styles.facPriceUnit}>/hr</Text></Text>
+              </View>
+            </Pressable>
+          ))}
+        </ScrollView>
 
-        <SectionHeader title="Nearby Courts" action="See all" onAction={() => router.push('/(tabs)/discover')} testID="home-nearby-header" />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>{data.facilities.map((f: any) => <Pressable key={f.id} testID={`home-facility-${f.id}`} style={styles.facCard} onPress={() => router.push(`/facility/${f.id}`)}><Image source={{ uri: f.image }} style={styles.facImage} contentFit="cover" /><View style={styles.facBody}><Text style={styles.facName} numberOfLines={1}>{f.name}</Text><Text style={styles.facMeta}>{f.area} · ⭐ {f.rating}</Text><Text style={styles.facPrice}>₹{f.price_per_hour}/hr</Text></View></Pressable>)}</ScrollView>
+        {/* Players */}
+        <SectionHeader title="Players near you" action="See all" onAction={() => router.push('/(tabs)/play')} testID="home-players-header" />
+        <View style={{ paddingHorizontal: spacing.lg, gap: spacing.sm }}>
+          {data.players.map((p: any) => (
+            <Pressable
+              key={p.id}
+              testID={`home-player-${p.id}`}
+              onPress={() => router.push(`/player/${p.id}`)}
+              style={({ pressed }) => [styles.playerRow, pressed && { backgroundColor: c.bgRaised }]}
+            >
+              <Image source={{ uri: p.avatar }} style={styles.avatar} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.playerName}>{p.name}</Text>
+                <Text style={styles.playerMeta}>{p.skill_level} · {p.area}</Text>
+              </View>
+              <MatchScoreBadge score={p.match_score} testID={`home-player-${p.id}-score`} />
+            </Pressable>
+          ))}
+        </View>
 
-        <SectionHeader title="Players Near You" action="See all" onAction={() => router.push('/(tabs)/play')} testID="home-players-header" />
-        <View style={{ paddingHorizontal: spacing.lg, gap: spacing.md }}>{data.players.slice(0, 3).map((p: any) => <Pressable key={p.id} testID={`home-player-${p.id}`} onPress={() => router.push(`/player/${p.id}`)} style={styles.playerRow}><Image source={{ uri: p.avatar }} style={styles.avatar} /><View style={{ flex: 1 }}><Text style={styles.playerName}>{p.name}</Text><Text style={styles.playerMeta}>{p.skill_level} · {p.area}</Text><Text style={styles.playerBio} numberOfLines={1}>{p.playing_style}</Text></View><MatchScoreBadge score={p.match_score} testID={`home-player-${p.id}-score`} /></Pressable>)}</View>
+        {/* Events */}
+        <SectionHeader title="Upcoming events" action="See all" onAction={() => router.push('/(tabs)/discover')} testID="home-events-header" />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>
+          {data.events.map((e: any) => (
+            <Pressable key={e.id} style={styles.eventCard} testID={`home-event-${e.id}`}>
+              <Image source={{ uri: e.image }} style={styles.eventImage} contentFit="cover" />
+              <View style={styles.eventBody}>
+                <Text style={styles.eventType}>{e.type}</Text>
+                <Text style={styles.eventName} numberOfLines={2}>{e.name}</Text>
+                <Text style={styles.eventMeta}>
+                  {new Date(e.date).toLocaleDateString('en', { day: 'numeric', month: 'short' })} · {e.city}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+        </ScrollView>
 
-        <SectionHeader title="Upcoming Events" action="See all" onAction={() => router.push('/(tabs)/discover')} testID="home-events-header" />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>{data.events.map((e: any) => <Pressable key={e.id} style={styles.eventCard} testID={`home-event-${e.id}`}><Image source={{ uri: e.image }} style={styles.eventImage} contentFit="cover" /><LinearGradient colors={['transparent', 'rgba(10,10,10,0.95)']} style={StyleSheet.absoluteFillObject} /><View style={styles.eventOverlay}><Text style={styles.eventType}>{e.type}</Text><Text style={styles.eventName} numberOfLines={2}>{e.name}</Text><Text style={styles.eventMeta}>{new Date(e.date).toDateString()}</Text></View></Pressable>)}</ScrollView>
-
-        <SectionHeader title="Gear Picked For You" action="Shop" onAction={() => router.push('/marketplace')} testID="home-gear-header" />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>{(data.rec.products || []).map((p: any) => <Pressable key={p.id} style={styles.productCard} onPress={() => router.push(`/product/${p.id}`)} testID={`home-product-${p.id}`}><Image source={{ uri: p.image }} style={styles.productImage} contentFit="cover" /><Text style={styles.productName} numberOfLines={2}>{p.name}</Text><Text style={styles.productPrice}>₹{p.price.toLocaleString('en-IN')}</Text></Pressable>)}</ScrollView>
+        {/* Gear */}
+        <SectionHeader title="Gear picked for you" action="Shop" onAction={() => router.push('/marketplace')} testID="home-gear-header" />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railContent}>
+          {(data.rec.products || []).map((p: any) => (
+            <Pressable
+              key={p.id}
+              style={styles.productCard}
+              onPress={() => router.push(`/product/${p.id}`)}
+              testID={`home-product-${p.id}`}
+            >
+              <Image source={{ uri: p.image }} style={styles.productImage} contentFit="cover" />
+              <Text style={styles.productName} numberOfLines={2}>{p.name}</Text>
+              <Text style={styles.productPrice}>₹{p.price.toLocaleString('en-IN')}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.surface }, hero: { height: 380, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.md }, heroTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', padding: spacing.lg }, heroLocation: { color: colors.onSurfaceSecondary, fontSize: font.sizes.xs, letterSpacing: 1, textTransform: 'uppercase', fontWeight: '600' }, heroHi: { color: colors.onSurface, fontSize: font.sizes.xl, fontWeight: '700', marginTop: 4 }, iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }, heroBottom: { padding: spacing.lg, paddingBottom: spacing.xl }, heroTitle: { color: colors.onSurface, fontSize: 34, fontWeight: '900', lineHeight: 38, letterSpacing: -0.5, marginBottom: spacing.lg }, ctaBtn: { alignSelf: 'flex-start', backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.pill }, ctaText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' }, quickRow: { flexDirection: 'row', paddingHorizontal: spacing.lg, gap: spacing.sm, marginTop: -spacing.md }, quickItem: { flex: 1, alignItems: 'center', backgroundColor: colors.surfaceSecondary, paddingVertical: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border }, quickIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.brandTertiary, alignItems: 'center', justifyContent: 'center', marginBottom: 6 }, quickLabel: { color: colors.onSurface, fontSize: font.sizes.xs, fontWeight: '600' }, insightCard: { marginHorizontal: spacing.lg, marginTop: spacing.lg, backgroundColor: colors.brandTertiary, borderColor: colors.brandSecondary }, insightLabel: { color: colors.brandPrimary, fontSize: font.sizes.xs, letterSpacing: 1.2, fontWeight: '700' }, insightText: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '600', lineHeight: 22 }, railContent: { paddingHorizontal: spacing.lg, gap: spacing.md }, facCard: { width: 260, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.border }, facImage: { width: '100%', height: 140 }, facBody: { padding: spacing.md }, facName: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '700' }, facMeta: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm, marginTop: 2 }, facPrice: { color: colors.brandPrimary, fontSize: font.sizes.base, fontWeight: '700', marginTop: 6 }, playerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border }, avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.surfaceTertiary }, playerName: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '700' }, playerMeta: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 2 }, playerBio: { color: colors.brandPrimary, fontSize: font.sizes.xs, marginTop: 2 }, eventCard: { width: 260, height: 180, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: colors.surfaceSecondary }, eventImage: { width: '100%', height: '100%' }, eventOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.md }, eventType: { color: colors.brandPrimary, fontSize: font.sizes.xs, textTransform: 'uppercase', fontWeight: '700', letterSpacing: 1 }, eventName: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800', marginTop: 4 }, eventMeta: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm, marginTop: 4 }, productCard: { width: 160 }, productImage: { width: 160, height: 160, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary }, productName: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '600', marginTop: spacing.sm }, productPrice: { color: colors.brandPrimary, fontSize: font.sizes.base, fontWeight: '800', marginTop: 4 },
+  wrap: { flex: 1, backgroundColor: c.bg },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+  },
+  eyebrow: {
+    color: c.textMuted,
+    fontSize: font.sizes.xs,
+    letterSpacing: 0.8,
+    fontWeight: font.weights.semibold,
+  },
+  greeting: {
+    color: c.text,
+    fontSize: font.sizes.xxl,
+    fontWeight: font.weights.heavy,
+    letterSpacing: -0.4,
+    marginTop: 4,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: c.bgElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.lg,
+    backgroundColor: c.bgElevated,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  insightLabel: {
+    color: c.textMuted,
+    fontSize: font.sizes.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: font.weights.semibold,
+    marginBottom: 4,
+  },
+  insightText: {
+    color: c.text,
+    fontSize: font.sizes.base,
+    fontWeight: font.weights.semibold,
+    lineHeight: 20,
+  },
+  quickRow: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  quickItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: c.bgElevated,
+  },
+  quickLabel: {
+    color: c.text,
+    fontSize: font.sizes.xs,
+    fontWeight: font.weights.semibold,
+  },
+  railContent: { paddingHorizontal: spacing.lg, gap: spacing.md },
+  facCard: {
+    width: 240,
+    backgroundColor: c.bgElevated,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+  },
+  facImage: { width: '100%', height: 128 },
+  facBody: { padding: spacing.md },
+  facName: {
+    color: c.text,
+    fontSize: font.sizes.base,
+    fontWeight: font.weights.bold,
+  },
+  facMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  facMeta: { color: c.textMuted, fontSize: font.sizes.sm },
+  dot: { color: c.textFaint, marginHorizontal: 2 },
+  facPrice: {
+    color: c.text,
+    fontSize: font.sizes.base,
+    fontWeight: font.weights.bold,
+    marginTop: 8,
+  },
+  facPriceUnit: {
+    color: c.textMuted,
+    fontWeight: font.weights.regular,
+    fontSize: font.sizes.sm,
+  },
+  playerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: c.bgElevated,
+    padding: spacing.md,
+    borderRadius: radius.md,
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: c.bgRaised,
+  },
+  playerName: {
+    color: c.text,
+    fontSize: font.sizes.base,
+    fontWeight: font.weights.semibold,
+  },
+  playerMeta: { color: c.textMuted, fontSize: font.sizes.sm, marginTop: 2 },
+  eventCard: {
+    width: 240,
+    backgroundColor: c.bgElevated,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+  },
+  eventImage: { width: '100%', height: 128 },
+  eventBody: { padding: spacing.md },
+  eventType: {
+    color: c.textMuted,
+    fontSize: font.sizes.xs,
+    textTransform: 'uppercase',
+    fontWeight: font.weights.semibold,
+    letterSpacing: 1,
+  },
+  eventName: {
+    color: c.text,
+    fontSize: font.sizes.base,
+    fontWeight: font.weights.bold,
+    marginTop: 4,
+    lineHeight: 20,
+  },
+  eventMeta: { color: c.textMuted, fontSize: font.sizes.sm, marginTop: 4 },
+  productCard: { width: 148 },
+  productImage: {
+    width: 148,
+    height: 148,
+    borderRadius: radius.md,
+    backgroundColor: c.bgElevated,
+  },
+  productName: {
+    color: c.text,
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+    marginTop: spacing.sm,
+    lineHeight: 18,
+  },
+  productPrice: {
+    color: c.text,
+    fontSize: font.sizes.base,
+    fontWeight: font.weights.bold,
+    marginTop: 4,
+  },
 });

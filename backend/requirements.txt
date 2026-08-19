@@ -120,3 +120,5 @@ websockets==16.1.1
 yarl==1.24.5
 zipp==4.1.0
 firebase-admin==7.1.0
+opencv-python-headless==4.10.0.84
+langgraph==0.2.60

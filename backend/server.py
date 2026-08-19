@@ -849,6 +849,10 @@ app.include_router(api)
 app.include_router(features.router)
 app.include_router(org_admin.router)
 
+# AI Coach (video-first, sensor-optional)
+from ai_coach.router import router as ai_coach_router  # noqa: E402
+app.include_router(ai_coach_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

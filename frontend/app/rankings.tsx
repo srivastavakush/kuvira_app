@@ -83,9 +83,9 @@ const styles = StyleSheet.create({
   badgeLabel: { color: colors.onSurfaceSecondary, fontSize: 10, textAlign: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   rowMe: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
-  rank: { width: 28, textAlign: 'center', color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '900' },
+  rank: { width: 28, textAlign: 'center', color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceTertiary },
   name: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
   meta: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 2 },
-  points: { color: colors.brandPrimary, fontSize: font.sizes.lg, fontWeight: '900' },
+  points: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '800' },
 });

@@ -4,8 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, font, radius } from '@/src/theme';
-import { ChipRow, Loader } from '@/src/components/ui';
+import { c, spacing, font, radius } from '@/src/theme';
+import { ChipRow, Loader, ScreenHeader } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 const CATEGORIES = [
@@ -40,18 +40,25 @@ export default function Marketplace() {
 
   const filtered = cat === 'all' ? products : products.filter((p) => p.category === cat);
 
-  if (loading) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
+  if (loading) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}><Loader /></SafeAreaView>;
 
   return (
-    <SafeAreaView style={styles.wrap} testID="marketplace-screen">
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} testID="marketplace-back"><Ionicons name="chevron-back" size={26} color={colors.onSurface} /></Pressable>
-        <Text style={styles.title}>Shop</Text>
-        <Pressable testID="marketplace-cart-btn" onPress={() => router.push('/cart')} style={styles.cartBtn}>
-          <Ionicons name="bag" size={22} color={colors.onSurface} />
-          {cartCount > 0 && <View style={styles.cartBadge}><Text style={styles.cartBadgeText}>{cartCount}</Text></View>}
-        </Pressable>
-      </View>
+    <SafeAreaView style={styles.wrap} edges={['top']} testID="marketplace-screen">
+      <ScreenHeader
+        title="Shop"
+        onBack={() => router.back()}
+        testID="marketplace"
+        right={
+          <Pressable testID="marketplace-cart-btn" onPress={() => router.push('/cart')} hitSlop={8}>
+            <Ionicons name="bag-outline" size={22} color={c.text} />
+            {cartCount > 0 && (
+              <View style={styles.cartBadge}>
+                <Text style={styles.cartBadgeText}>{cartCount}</Text>
+              </View>
+            )}
+          </Pressable>
+        }
+      />
 
       <ChipRow items={CATEGORIES} active={cat} onChange={setCat} testIDPrefix="market-cat" />
 
@@ -63,11 +70,8 @@ export default function Marketplace() {
         contentContainerStyle={{ paddingBottom: spacing.xxxl, gap: spacing.md }}
         ListHeaderComponent={
           cat === 'all' && recommended.length ? (
-            <View style={{ marginBottom: spacing.md }}>
-              <View style={styles.recoHeader}>
-                <Ionicons name="sparkles" size={14} color={colors.brandPrimary} />
-                <Text style={styles.recoLabel}>PICKED FOR YOUR PLAY STYLE</Text>
-              </View>
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.recoLabel}>Recommended for you</Text>
               <FlatList
                 data={recommended}
                 horizontal
@@ -88,12 +92,15 @@ export default function Marketplace() {
         renderItem={({ item }) => (
           <Pressable testID={`market-product-${item.id}`} style={styles.card} onPress={() => router.push(`/product/${item.id}`)}>
             <Image source={{ uri: item.image }} style={styles.cardImg} contentFit="cover" />
-            <View style={{ padding: spacing.sm }}>
+            <View style={styles.cardBody}>
               <Text style={styles.brand}>{item.brand}</Text>
               <Text style={styles.name} numberOfLines={2}>{item.name}</Text>
               <View style={styles.priceRow}>
                 <Text style={styles.price}>₹{item.price.toLocaleString('en-IN')}</Text>
-                <Text style={styles.rating}>⭐ {item.rating}</Text>
+                <View style={styles.ratingRow}>
+                  <Ionicons name="star" size={11} color={c.textMuted} />
+                  <Text style={styles.rating}>{item.rating}</Text>
+                </View>
               </View>
             </View>
           </Pressable>
@@ -104,23 +111,21 @@ export default function Marketplace() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.surface },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  title: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '900' },
-  cartBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  cartBadge: { position: 'absolute', top: 4, right: 2, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.brandPrimary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  cartBadgeText: { color: colors.onBrandPrimary, fontSize: 10, fontWeight: '800' },
-  recoHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
-  recoLabel: { color: colors.brandPrimary, fontSize: font.sizes.xs, letterSpacing: 1.2, fontWeight: '700' },
+  wrap: { flex: 1, backgroundColor: c.bg },
+  cartBadge: { position: 'absolute', top: -6, right: -8, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  cartBadgeText: { color: c.onAccent, fontSize: 10, fontWeight: font.weights.bold },
+  recoLabel: { color: c.textMuted, fontSize: font.sizes.xs, letterSpacing: 1.2, fontWeight: font.weights.semibold, textTransform: 'uppercase', paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
   recoCard: { width: 140 },
-  recoImg: { width: 140, height: 140, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary },
-  recoName: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: '600', marginTop: 6 },
-  recoPrice: { color: colors.brandPrimary, fontSize: font.sizes.base, fontWeight: '800', marginTop: 2 },
-  card: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
-  cardImg: { width: '100%', height: 150, backgroundColor: colors.surfaceTertiary },
-  brand: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 0.6 },
-  name: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '600', marginTop: 2, minHeight: 38 },
-  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
-  price: { color: colors.brandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
-  rating: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm },
+  recoImg: { width: 140, height: 140, borderRadius: radius.md, backgroundColor: c.bgElevated },
+  recoName: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.medium, marginTop: 8 },
+  recoPrice: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.bold, marginTop: 2 },
+  card: { flex: 1, backgroundColor: c.bgElevated, borderRadius: radius.md, overflow: 'hidden' },
+  cardImg: { width: '100%', height: 150, backgroundColor: c.bgRaised },
+  cardBody: { padding: spacing.sm },
+  brand: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: font.weights.semibold },
+  name: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.medium, marginTop: 2, minHeight: 36, lineHeight: 18 },
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
+  price: { color: c.text, fontSize: font.sizes.base, fontWeight: font.weights.bold },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  rating: { color: c.textMuted, fontSize: font.sizes.xs },
 });

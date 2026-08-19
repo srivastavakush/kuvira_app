@@ -1,11 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, font, radius } from '@/src/theme';
-import { Loader, EmptyState } from '@/src/components/ui';
+import { c, spacing, font, radius } from '@/src/theme';
+import { Loader, EmptyState, ScreenHeader, Button, SuccessMark } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 export default function Cart() {
@@ -17,9 +17,7 @@ export default function Cart() {
   const load = useCallback(async () => { setCart(await api.cart()); }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  async function remove(pid: string) {
-    setCart(await api.removeFromCart(pid));
-  }
+  async function remove(pid: string) { setCart(await api.removeFromCart(pid)); }
 
   async function checkout() {
     setPlacing(true);
@@ -29,34 +27,36 @@ export default function Cart() {
     } finally { setPlacing(false); }
   }
 
-  if (!cart) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
+  if (!cart) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}><Loader /></SafeAreaView>;
 
   if (order) {
     return (
-      <SafeAreaView style={styles.wrap} testID="cart-order-confirmed">
+      <SafeAreaView style={styles.wrap} edges={['top']} testID="cart-order-confirmed">
         <View style={styles.confirmWrap}>
-          <View style={styles.checkCircle}><Ionicons name="checkmark" size={48} color={colors.onBrandPrimary} /></View>
-          <Text style={styles.confirmTitle}>Order Placed!</Text>
-          <Text style={styles.confirmSub}>Paid ₹{order.total.toLocaleString('en-IN')} via PayU</Text>
-          <Text style={styles.orderId}>Order #{order.id.slice(0, 8).toUpperCase()}</Text>
-          <Pressable testID="cart-continue-shopping" style={styles.doneBtn} onPress={() => router.replace('/marketplace')}>
-            <Text style={styles.doneBtnText}>Continue Shopping</Text>
-          </Pressable>
+          <SuccessMark />
+          <Text style={styles.confirmTitle}>Order placed</Text>
+          <Text style={styles.confirmSub}>Paid ₹{order.total.toLocaleString('en-IN')} · Order #{order.id.slice(0, 8).toUpperCase()}</Text>
+          <View style={{ alignSelf: 'stretch', marginTop: spacing.xl, maxWidth: 340 }}>
+            <Button label="Continue shopping" onPress={() => router.replace('/marketplace')} testID="cart-continue-shopping" />
+          </View>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.wrap} testID="cart-screen">
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} testID="cart-back"><Ionicons name="chevron-back" size={26} color={colors.onSurface} /></Pressable>
-        <Text style={styles.title}>Cart</Text>
-        <View style={{ width: 26 }} />
-      </View>
+    <SafeAreaView style={styles.wrap} edges={['top']} testID="cart-screen">
+      <ScreenHeader title="Cart" onBack={() => router.back()} testID="cart" />
 
       {cart.items.length === 0 ? (
-        <EmptyState title="Your cart is empty" subtitle="Your sports journey starts here." cta="Browse Shop" onCta={() => router.replace('/marketplace')} testID="cart-empty" />
+        <EmptyState
+          title="Your cart is empty"
+          subtitle="Browse the shop to add gear."
+          cta="Browse shop"
+          onCta={() => router.replace('/marketplace')}
+          icon="bag-outline"
+          testID="cart-empty"
+        />
       ) : (
         <>
           <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 160, gap: spacing.md }}>
@@ -65,11 +65,11 @@ export default function Cart() {
                 <Image source={{ uri: it.product.image }} style={styles.itemImg} contentFit="cover" />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.itemName} numberOfLines={2}>{it.product.name}</Text>
-                  <Text style={styles.itemQty}>Qty: {it.qty}</Text>
+                  <Text style={styles.itemQty}>Qty {it.qty}</Text>
                   <Text style={styles.itemPrice}>₹{it.subtotal.toLocaleString('en-IN')}</Text>
                 </View>
-                <Pressable testID={`cart-remove-${it.product.id}`} onPress={() => remove(it.product.id)} style={styles.removeBtn}>
-                  <Ionicons name="trash-outline" size={20} color={colors.error} />
+                <Pressable testID={`cart-remove-${it.product.id}`} onPress={() => remove(it.product.id)} hitSlop={8} style={styles.removeBtn}>
+                  <Ionicons name="close" size={20} color={c.textMuted} />
                 </Pressable>
               </View>
             ))}
@@ -77,16 +77,21 @@ export default function Cart() {
             <View style={styles.summary}>
               <View style={styles.sumRow}><Text style={styles.sumLabel}>Subtotal</Text><Text style={styles.sumVal}>₹{cart.total.toLocaleString('en-IN')}</Text></View>
               <View style={styles.sumRow}><Text style={styles.sumLabel}>Delivery</Text><Text style={styles.sumVal}>Free</Text></View>
-              <View style={[styles.sumRow, { borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: spacing.sm, marginTop: spacing.sm }]}>
-                <Text style={styles.totalLabel}>Total</Text><Text style={styles.totalVal}>₹{cart.total.toLocaleString('en-IN')}</Text>
+              <View style={styles.sumSep} />
+              <View style={styles.sumRow}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalVal}>₹{cart.total.toLocaleString('en-IN')}</Text>
               </View>
             </View>
           </ScrollView>
 
           <View style={styles.footer}>
-            <Pressable testID="cart-checkout-btn" disabled={placing} style={[styles.checkoutBtn, placing && { opacity: 0.6 }]} onPress={checkout}>
-              <Text style={styles.checkoutBtnText}>{placing ? 'Processing…' : `Checkout · ₹${cart.total.toLocaleString('en-IN')}`}</Text>
-            </Pressable>
+            <Button
+              testID="cart-checkout-btn"
+              loading={placing}
+              onPress={checkout}
+              label={`Checkout · ₹${cart.total.toLocaleString('en-IN')}`}
+            />
           </View>
         </>
       )}
@@ -95,29 +100,22 @@ export default function Cart() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.surface },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
-  title: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
-  item: { flexDirection: 'row', gap: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.sm, borderWidth: 1, borderColor: colors.border },
-  itemImg: { width: 80, height: 80, borderRadius: radius.sm, backgroundColor: colors.surfaceTertiary },
-  itemName: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
-  itemQty: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 4 },
-  itemPrice: { color: colors.brandPrimary, fontSize: font.sizes.lg, fontWeight: '800', marginTop: 4 },
+  wrap: { flex: 1, backgroundColor: c.bg },
+  item: { flexDirection: 'row', gap: spacing.md, backgroundColor: c.bgElevated, borderRadius: radius.md, padding: spacing.sm, alignItems: 'center' },
+  itemImg: { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: c.bgRaised },
+  itemName: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.semibold, lineHeight: 18 },
+  itemQty: { color: c.textMuted, fontSize: font.sizes.xs, marginTop: 4 },
+  itemPrice: { color: c.text, fontSize: font.sizes.base, fontWeight: font.weights.bold, marginTop: 4 },
   removeBtn: { padding: spacing.sm },
-  summary: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.lg, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
+  summary: { backgroundColor: c.bgElevated, borderRadius: radius.md, padding: spacing.lg, marginTop: spacing.sm, gap: 6 },
   sumRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
-  sumLabel: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base },
-  sumVal: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '600' },
-  totalLabel: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
-  totalVal: { color: colors.brandPrimary, fontSize: font.sizes.xl, fontWeight: '900' },
-  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
-  checkoutBtn: { backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center' },
-  checkoutBtnText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
+  sumLabel: { color: c.textMuted, fontSize: font.sizes.sm },
+  sumVal: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
+  sumSep: { height: StyleSheet.hairlineWidth, backgroundColor: c.divider, marginVertical: 4 },
+  totalLabel: { color: c.text, fontSize: font.sizes.base, fontWeight: font.weights.bold },
+  totalVal: { color: c.text, fontSize: font.sizes.xl, fontWeight: font.weights.heavy },
+  footer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: c.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.divider },
   confirmWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  checkCircle: { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.brandPrimary, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
-  confirmTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900' },
-  confirmSub: { color: colors.onSurfaceSecondary, fontSize: font.sizes.lg, marginTop: 4 },
-  orderId: { color: colors.brandPrimary, fontSize: font.sizes.base, fontWeight: '700', marginTop: spacing.sm },
-  doneBtn: { alignSelf: 'stretch', backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center', marginTop: spacing.xl },
-  doneBtnText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, fontWeight: '800' },
+  confirmTitle: { color: c.text, fontSize: font.sizes.xxl, fontWeight: font.weights.heavy, marginTop: spacing.lg, letterSpacing: -0.3 },
+  confirmSub: { color: c.textMuted, fontSize: font.sizes.base, marginTop: 6, textAlign: 'center' },
 });

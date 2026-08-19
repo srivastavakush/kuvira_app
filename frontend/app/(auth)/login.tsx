@@ -36,7 +36,7 @@ export default function Login() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.brandWrap}>
             <Text style={styles.brand}>KUVIRA</Text>
-            <Text style={styles.tagline}>Discover · Play · Train · Compete</Text>
+            <Text style={styles.tagline}>Play with intent</Text>
           </View>
           <View style={styles.form}>
             <Text style={styles.headline}>Sign in with mobile</Text>
@@ -68,10 +68,10 @@ export default function Login() {
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.surface },
   brandWrap: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: spacing.xl, paddingBottom: spacing.xl },
-  brand: { color: colors.brandPrimary, fontSize: 52, fontWeight: '900', letterSpacing: 6 },
-  tagline: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: spacing.xs, letterSpacing: 1.6 },
+  brand: { color: colors.onSurface, fontSize: 44, fontWeight: '800', letterSpacing: 6 },
+  tagline: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm, marginTop: spacing.xs, letterSpacing: 1.6, textTransform: 'uppercase' as const },
   form: { padding: spacing.xl, backgroundColor: 'rgba(10,10,10,0.85)', borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg },
-  headline: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800' },
+  headline: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', letterSpacing: -0.3 },
   sub: { color: colors.onSurfaceMuted, fontSize: font.sizes.base, marginTop: spacing.xs, marginBottom: spacing.lg },
   inputRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceTertiary, borderRadius: radius.md, paddingHorizontal: spacing.lg, borderWidth: 1, borderColor: colors.border },
   cc: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '700', marginRight: spacing.md },

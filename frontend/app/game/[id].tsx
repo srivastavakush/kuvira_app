@@ -69,7 +69,7 @@ export default function GameDetail() {
           <View style={styles.playerDots}>
             {Array.from({ length: g.max_players }).map((_, i) => (
               <View key={i} style={[styles.dot, i < g.current_players.length ? styles.dotFilled : styles.dotEmpty]}>
-                <Ionicons name={i < g.current_players.length ? 'person' : 'add'} size={20} color={i < g.current_players.length ? colors.onBrandPrimary : colors.onSurfaceMuted} />
+                <Ionicons name={i < g.current_players.length ? 'person' : 'add'} size={18} color={i < g.current_players.length ? colors.onSurface : colors.onSurfaceMuted} />
               </View>
             ))}
           </View>
@@ -84,7 +84,7 @@ export default function GameDetail() {
           onPress={join}
         >
           <Text style={[styles.joinBtnText, (joined || full) && { color: colors.onSurfaceSecondary }]}>
-            {joined ? '✓ You\'re in' : full ? 'Game Full' : joining ? 'Joining…' : `Join Game · ₹${g.price_per_person}`}
+            {joined ? 'You\'re in' : full ? 'Game full' : joining ? 'Joining…' : `Join · ₹${g.price_per_person}`}
           </Text>
         </Pressable>
       </View>
@@ -95,7 +95,7 @@ export default function GameDetail() {
 function Info({ icon, label, value }: { icon: any; label: string; value: string }) {
   return (
     <View style={styles.infoBox}>
-      <Ionicons name={icon} size={18} color={colors.brandPrimary} />
+      <Ionicons name={icon} size={18} color={colors.onSurfaceSecondary} />
       <Text style={styles.infoVal}>{value}</Text>
       <Text style={styles.infoLabel}>{label}</Text>
     </View>
@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
   heroBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg },
   badge: { alignSelf: 'flex-start', backgroundColor: colors.brandTertiary, borderColor: colors.brandPrimary, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm, marginBottom: 6 },
   badgeText: { color: colors.brandPrimary, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  title: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900' },
+  title: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', letterSpacing: -0.3 },
   meta: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: 4 },
   body: { padding: spacing.lg },
   infoRow: { flexDirection: 'row', gap: spacing.md },
@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
   hostMeta: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 2 },
   playerDots: { flexDirection: 'row', gap: spacing.md },
   dot: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  dotFilled: { backgroundColor: colors.brandPrimary },
+  dotFilled: { backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.borderStrong },
   dotEmpty: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.borderStrong, borderStyle: 'dashed' },
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
   joinBtn: { backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center' },

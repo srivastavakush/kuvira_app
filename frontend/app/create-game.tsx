@@ -63,7 +63,7 @@ export default function CreateGame() {
         <View style={styles.chipWrap}>
           {SKILLS.map((s) => (
             <Pressable key={s} testID={`create-skill-${s}`} onPress={() => setSkill(s)} style={[styles.chip, skill === s && styles.chipActive]}>
-              <Text style={[styles.chipText, skill === s && styles.optTextActive]}>{s}</Text>
+              <Text style={[styles.chipText, skill === s && styles.chipTextActive]}>{s}</Text>
             </Pressable>
           ))}
         </View>
@@ -72,7 +72,7 @@ export default function CreateGame() {
         <View style={styles.chipWrap}>
           {FORMATS.map((fmt) => (
             <Pressable key={fmt} testID={`create-format-${fmt}`} onPress={() => setFormat(fmt)} style={[styles.chip, format === fmt && styles.chipActive]}>
-              <Text style={[styles.chipText, format === fmt && styles.optTextActive]}>{fmt}</Text>
+              <Text style={[styles.chipText, format === fmt && styles.chipTextActive]}>{fmt}</Text>
             </Pressable>
           ))}
         </View>
@@ -81,7 +81,7 @@ export default function CreateGame() {
         <View style={styles.chipWrap}>
           {[2, 4, 6, 8].map((n) => (
             <Pressable key={n} testID={`create-players-${n}`} onPress={() => setMaxPlayers(n)} style={[styles.chip, maxPlayers === n && styles.chipActive]}>
-              <Text style={[styles.chipText, maxPlayers === n && styles.optTextActive]}>{n}</Text>
+              <Text style={[styles.chipText, maxPlayers === n && styles.chipTextActive]}>{n}</Text>
             </Pressable>
           ))}
         </View>
@@ -107,15 +107,15 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
   label: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', marginTop: spacing.xl, marginBottom: spacing.md },
-  optRow: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
-  optRowActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
-  optRowText: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
+  chip: { paddingHorizontal: spacing.lg, height: 40, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary },
+  chipActive: { backgroundColor: colors.surfaceTertiary },
+  chipText: { color: colors.onSurfaceSecondary, fontWeight: '500' },
+  chipTextActive: { color: colors.onSurface, fontWeight: '700' },
+  optRow: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
+  optRowActive: { backgroundColor: colors.surfaceTertiary },
+  optRowText: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '600' },
   optRowSub: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 2 },
-  optTextActive: { color: colors.brandPrimary },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  chip: { paddingHorizontal: spacing.lg, height: 42, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.borderStrong },
-  chipActive: { backgroundColor: colors.brandTertiary, borderColor: colors.brandPrimary },
-  chipText: { color: colors.onSurfaceSecondary, fontWeight: '600' },
+  optTextActive: { color: colors.onSurface, fontWeight: '700' },
   input: { backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, color: colors.onSurface, fontSize: font.sizes.lg, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
   submitBtn: { backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center' },

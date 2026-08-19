@@ -51,11 +51,11 @@ export default function ProductDetail() {
             {p.original_price ? <Text style={styles.orig}>₹{p.original_price.toLocaleString('en-IN')}</Text> : null}
             {discount > 0 ? <View style={styles.discountBadge}><Text style={styles.discountText}>{discount}% OFF</Text></View> : null}
           </View>
-          <Text style={styles.rating}>⭐ {p.rating} · {p.reviews_count} reviews</Text>
+          <View style={styles.ratingRow}><Ionicons name="star" size={12} color={colors.onSurfaceSecondary} /><Text style={styles.rating}>{p.rating} · {p.reviews_count} reviews</Text></View>
 
           <View style={styles.aiBox} testID="product-ai-fit">
-            <Ionicons name="sparkles" size={16} color={colors.brandPrimary} />
-            <Text style={styles.aiText}>Recommended for <Text style={{ color: colors.brandPrimary, fontWeight: '700' }}>{p.recommended_skill}</Text> players with a <Text style={{ color: colors.brandPrimary, fontWeight: '700' }}>{p.playing_style}</Text> style.</Text>
+            <Text style={styles.aiEyebrow}>Coach fit</Text>
+            <Text style={styles.aiText}>Recommended for <Text style={{ color: colors.onSurface, fontWeight: '700' }}>{p.recommended_skill}</Text> players with a <Text style={{ color: colors.onSurface, fontWeight: '700' }}>{p.playing_style}</Text> style.</Text>
           </View>
 
           <Text style={styles.sectionH}>Description</Text>
@@ -75,10 +75,11 @@ export default function ProductDetail() {
 
       <View style={styles.footer}>
         <Pressable testID="product-add-cart" disabled={adding} style={styles.addBtn} onPress={add}>
-          <Text style={styles.addBtnText}>{added ? '✓ Added to Cart' : adding ? 'Adding…' : 'Add to Cart'}</Text>
+          {added ? <Ionicons name="checkmark" size={16} color={colors.onSurface} /> : null}
+          <Text style={styles.addBtnText}>{added ? 'Added' : adding ? 'Adding…' : 'Add to cart'}</Text>
         </Pressable>
         <Pressable testID="product-buy-now" style={styles.buyBtn} onPress={async () => { if (!added) await add(); router.push('/cart'); }}>
-          <Text style={styles.buyBtnText}>Buy Now</Text>
+          <Text style={styles.buyBtnText}>Buy now</Text>
         </Pressable>
       </View>
     </View>
@@ -90,16 +91,18 @@ const styles = StyleSheet.create({
   hero: { height: 340, backgroundColor: colors.surfaceSecondary },
   backBtn: { margin: spacing.md, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   body: { padding: spacing.lg },
-  brand: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, textTransform: 'uppercase', letterSpacing: 1 },
-  name: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '900', marginTop: 2 },
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.sm },
-  price: { color: colors.brandPrimary, fontSize: font.sizes.xxxl, fontWeight: '900' },
-  orig: { color: colors.onSurfaceMuted, fontSize: font.sizes.lg, textDecorationLine: 'line-through' },
+  brand: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '600' },
+  name: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', marginTop: 4, letterSpacing: -0.3 },
+  priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.md, marginTop: spacing.sm },
+  price: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800' },
+  orig: { color: colors.onSurfaceMuted, fontSize: font.sizes.base, textDecorationLine: 'line-through' },
   discountBadge: { backgroundColor: colors.success, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm },
   discountText: { color: colors.onSurface, fontSize: font.sizes.xs, fontWeight: '800' },
-  rating: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: spacing.sm },
-  aiBox: { flexDirection: 'row', gap: spacing.sm, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandSecondary, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg },
-  aiText: { flex: 1, color: colors.onSurface, fontSize: font.sizes.sm, lineHeight: 19 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: spacing.sm },
+  rating: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm },
+  aiBox: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, marginTop: spacing.lg, gap: 6 },
+  aiEyebrow: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: '700' },
+  aiText: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm, lineHeight: 20 },
   sectionH: { color: colors.onSurface, fontSize: font.sizes.xl, fontWeight: '800', marginTop: spacing.xl, marginBottom: spacing.md },
   desc: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, lineHeight: 22 },
   specs: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
@@ -107,8 +110,8 @@ const styles = StyleSheet.create({
   specKey: { color: colors.onSurfaceMuted, fontSize: font.sizes.base },
   specVal: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', gap: spacing.md, padding: spacing.lg, paddingBottom: spacing.xl, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
-  addBtn: { flex: 1, borderWidth: 1, borderColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center' },
-  addBtnText: { color: colors.brandPrimary, fontSize: font.sizes.base, fontWeight: '800' },
+  addBtn: { flex: 1, flexDirection: 'row', gap: 6, borderWidth: 1, borderColor: colors.borderStrong, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
+  addBtnText: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
   buyBtn: { flex: 1, backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, alignItems: 'center' },
-  buyBtnText: { color: colors.onBrandPrimary, fontSize: font.sizes.base, fontWeight: '800' },
+  buyBtnText: { color: colors.onBrandPrimary, fontSize: font.sizes.base, fontWeight: '700' },
 });

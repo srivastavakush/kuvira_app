@@ -1,131 +1,167 @@
-import { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, TextInput, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, font, radius } from '@/src/theme';
+import { c, spacing, font, radius } from '@/src/theme';
+import { ScreenHeader, Button, EmptyState, Divider, Badge } from '@/src/components/ui';
 import { api } from '@/src/api';
+import { useSession } from '@/src/session';
 
-const SUGGESTIONS = [
-  'How do I improve my backhand?',
-  'Create a 4-week training plan',
-  'Which paddle suits my style?',
-  'What should I train this week?',
-];
-
-type Msg = { role: 'user' | 'assistant'; text: string };
-
-export default function AICoach() {
+export default function AICoachHub() {
   const router = useRouter();
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const scrollRef = useRef<ScrollView>(null);
+  const { user } = useSession();
+  const [matches, setMatches] = useState<any[]>([]);
+  const [perf, setPerf] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await api.aiHistory();
-        setMessages((res.messages || []).map((m: any) => ({ role: m.role, text: m.text })));
-      } finally { setLoadingHistory(false); }
-    })();
+  const load = useCallback(async () => {
+    try {
+      const [m, p] = await Promise.all([
+        api.aiCoach.listMatches().catch(() => []),
+        api.aiCoach.playerPerformance().catch(() => null),
+      ]);
+      setMatches(m); setPerf(p);
+    } finally { setLoading(false); }
   }, []);
 
-  async function send(text: string) {
-    if (!text.trim() || sending) return;
-    setInput('');
-    setMessages((prev) => [...prev, { role: 'user', text }]);
-    setSending(true);
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-    try {
-      const res: any = await api.aiChat(text);
-      setMessages((prev) => [...prev, { role: 'assistant', text: res.reply }]);
-    } catch (e: any) {
-      setMessages((prev) => [...prev, { role: 'assistant', text: 'Sorry, I could not respond right now. Please try again.' }]);
-    } finally {
-      setSending(false);
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  }
+  useEffect(() => { load(); }, [load]);
+  async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
+
+  const latest = matches[0];
+  const level = user?.skill_level || null;
 
   return (
-    <SafeAreaView style={styles.wrap} testID="ai-coach-screen">
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} testID="ai-back"><Ionicons name="chevron-back" size={26} color={colors.onSurface} /></Pressable>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <View style={styles.aiDot}><Ionicons name="sparkles" size={16} color={colors.onBrandPrimary} /></View>
-          <Text style={styles.headerTitle}>AI Coach</Text>
+    <SafeAreaView style={styles.wrap} edges={['top']} testID="ai-coach-hub">
+      <ScreenHeader
+        title="Coach"
+        onBack={() => router.back()}
+        right={level ? <Badge label={level} variant="neutral" size="sm" /> : undefined}
+      />
+
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: spacing.xxxl }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.textFaint} />}
+      >
+        {/* Primary CTA */}
+        <View style={styles.primary}>
+          <Text style={styles.primaryEyebrow}>Analyze</Text>
+          <Text style={styles.primaryTitle}>Turn a match video into a coaching report.</Text>
+          <Text style={styles.primarySub}>Upload footage of your match. We’ll produce structured, evidence-based analysis you can train against.</Text>
+          <View style={{ marginTop: spacing.lg }}>
+            <Button label="Analyze a match" onPress={() => router.push('/ai-coach/upload')} testID="ai-coach-analyze" />
+          </View>
         </View>
-        <View style={{ width: 26 }} />
-      </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}>
-        <ScrollView ref={scrollRef} contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl, gap: spacing.md }} showsVerticalScrollIndicator={false}>
-          {messages.length === 0 && !loadingHistory && (
-            <View style={styles.empty}>
-              <View style={styles.bigAiDot}><Ionicons name="sparkles" size={32} color={colors.onBrandPrimary} /></View>
-              <Text style={styles.emptyTitle}>Your personal AI Coach</Text>
-              <Text style={styles.emptySub}>Ask about training, technique, strategy, or equipment. I know your profile.</Text>
-              <View style={{ gap: spacing.sm, alignSelf: 'stretch', marginTop: spacing.lg }}>
-                {SUGGESTIONS.map((s) => (
-                  <Pressable key={s} testID={`ai-suggestion-${s.slice(0, 10)}`} style={styles.suggestion} onPress={() => send(s)}>
-                    <Text style={styles.suggestionText}>{s}</Text>
-                    <Ionicons name="arrow-forward" size={16} color={colors.brandPrimary} />
-                  </Pressable>
-                ))}
-              </View>
+        {/* Recent match + report shortcut */}
+        {latest ? (
+          <Pressable
+            testID="ai-coach-recent-match"
+            onPress={() => router.push(latest.report ? `/ai-coach/report/${latest.id}` : `/ai-coach/analyzing/${latest.job?.id || ''}?matchId=${latest.id}`)}
+            style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.bgRaised }]}
+          >
+            <View style={styles.rowIcon}>
+              <Ionicons name="videocam-outline" size={20} color={c.text} />
             </View>
-          )}
-          {messages.map((m, i) => (
-            <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.aiBubble]} testID={`ai-msg-${m.role}-${i}`}>
-              <Text style={[styles.bubbleText, m.role === 'assistant' && { color: colors.onSurface }]}>{m.text}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowLabel}>Recent match</Text>
+              <Text style={styles.rowValue} numberOfLines={1}>
+                {latest.opponent_name ? `vs ${latest.opponent_name}` : latest.sport}
+                {latest.result ? ` • ${latest.result}` : ''}
+              </Text>
+              <Text style={styles.rowMeta}>
+                {latest.report ? 'Report ready' : latest.job?.status === 'processing' ? 'Analyzing…' : latest.job?.status === 'failed' ? 'Analysis failed' : 'Awaiting analysis'}
+              </Text>
             </View>
-          ))}
-          {sending && (
-            <View style={[styles.bubble, styles.aiBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
-              <ActivityIndicator size="small" color={colors.brandPrimary} />
-              <Text style={{ color: colors.onSurfaceMuted }}>Coach is thinking…</Text>
-            </View>
-          )}
-        </ScrollView>
-
-        <View style={styles.inputBar}>
-          <TextInput
-            testID="ai-input"
-            value={input}
-            onChangeText={setInput}
-            placeholder="Ask your coach…"
-            placeholderTextColor={colors.onSurfaceMuted}
-            style={styles.input}
-            multiline
-            onSubmitEditing={() => send(input)}
-          />
-          <Pressable testID="ai-send-btn" style={[styles.sendBtn, (!input.trim() || sending) && { opacity: 0.5 }]} disabled={!input.trim() || sending} onPress={() => send(input)}>
-            <Ionicons name="arrow-up" size={22} color={colors.onBrandPrimary} />
+            <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
           </Pressable>
+        ) : null}
+
+        {/* Secondary entry points */}
+        <View style={styles.menuBlock}>
+          <View style={styles.menuGroup}>
+            <MenuRow icon="stats-chart-outline" label="Performance trends" sub={perf?.matches_analyzed ? `${perf.matches_analyzed} match${perf.matches_analyzed === 1 ? '' : 'es'} analyzed` : 'No analyzed matches yet'} onPress={() => router.push('/ai-coach/performance')} />
+            <Divider inset={spacing.md} />
+            <MenuRow icon="barbell-outline" label="Training plan" sub={latest?.report ? 'Latest plan available' : 'Available after your first analysis'} onPress={() => latest?.report ? router.push(`/ai-coach/report/${latest.id}?tab=training`) : router.push('/ai-coach/upload')} />
+            <Divider inset={spacing.md} />
+            <MenuRow icon="chatbubble-ellipses-outline" label="Ask the coach" sub="Grounded in your latest match" onPress={() => router.push('/ai-coach/chat')} />
+          </View>
         </View>
-      </KeyboardAvoidingView>
+
+        {/* Match list */}
+        {loading ? null : matches.length === 0 ? (
+          <EmptyState
+            title="No analyzed matches yet"
+            subtitle="Upload your first match video to see structured coaching."
+            icon="videocam-outline"
+            cta="Upload a match"
+            onCta={() => router.push('/ai-coach/upload')}
+            testID="ai-coach-empty"
+          />
+        ) : (
+          <View style={styles.menuBlock}>
+            <Text style={styles.sectionLabel}>All matches</Text>
+            <View style={styles.menuGroup}>
+              {matches.map((m, i) => (
+                <View key={m.id}>
+                  {i > 0 ? <Divider inset={spacing.md} /> : null}
+                  <Pressable
+                    testID={`ai-coach-match-${m.id}`}
+                    onPress={() => router.push(m.report ? `/ai-coach/report/${m.id}` : `/ai-coach/analyzing/${m.job?.id || ''}?matchId=${m.id}`)}
+                    style={({ pressed }) => [styles.matchRow, pressed && { backgroundColor: c.bgRaised }]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.matchTitle} numberOfLines={1}>{m.opponent_name ? `vs ${m.opponent_name}` : m.sport}</Text>
+                      <Text style={styles.matchMeta}>{new Date(m.created_at).toDateString()}{m.result ? ` • ${m.result}` : ''}</Text>
+                    </View>
+                    <Text style={[styles.matchStatus, m.job?.status === 'failed' && { color: c.danger }, m.report && { color: c.positive }]}>
+                      {m.report ? 'Ready' : m.job?.status === 'processing' ? 'Analyzing' : m.job?.status === 'failed' ? 'Failed' : 'Pending'}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
+function MenuRow({ icon, label, sub, onPress }: { icon: any; label: string; sub?: string; onPress?: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.menuRow, pressed && { backgroundColor: c.bgRaised }]}>
+      <Ionicons name={icon} size={18} color={c.text} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.menuLabel}>{label}</Text>
+        {sub ? <Text style={styles.menuSub}>{sub}</Text> : null}
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.surface },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
-  headerTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
-  aiDot: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.brandPrimary, alignItems: 'center', justifyContent: 'center' },
-  empty: { alignItems: 'center', paddingTop: spacing.xxl },
-  bigAiDot: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.brandPrimary, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
-  emptyTitle: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '900' },
-  emptySub: { color: colors.onSurfaceMuted, fontSize: font.sizes.base, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg },
-  suggestion: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md },
-  suggestionText: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '600', flex: 1 },
-  bubble: { maxWidth: '85%', padding: spacing.md, borderRadius: radius.lg },
-  userBubble: { alignSelf: 'flex-end', backgroundColor: colors.surfaceTertiary, borderBottomRightRadius: 4 },
-  aiBubble: { alignSelf: 'flex-start', backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandSecondary, borderBottomLeftRadius: 4 },
-  bubbleText: { color: colors.onSurface, fontSize: font.sizes.base, lineHeight: 21 },
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, padding: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
-  input: { flex: 1, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, color: colors.onSurface, fontSize: font.sizes.base, paddingHorizontal: spacing.md, paddingVertical: spacing.md, maxHeight: 120 },
-  sendBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.brandPrimary, alignItems: 'center', justifyContent: 'center' },
+  wrap: { flex: 1, backgroundColor: c.bg },
+  primary: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  primaryEyebrow: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: font.weights.semibold, marginBottom: 6 },
+  primaryTitle: { color: c.text, fontSize: font.sizes.xxl, fontWeight: font.weights.heavy, letterSpacing: -0.3, lineHeight: 30 },
+  primarySub: { color: c.textMuted, fontSize: font.sizes.base, lineHeight: 22, marginTop: spacing.sm },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginHorizontal: spacing.lg, marginBottom: spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.md, backgroundColor: c.bgElevated, borderRadius: radius.md },
+  rowIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.bgRaised, alignItems: 'center', justifyContent: 'center' },
+  rowLabel: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1, fontWeight: font.weights.semibold },
+  rowValue: { color: c.text, fontSize: font.sizes.base, fontWeight: font.weights.semibold, marginTop: 2 },
+  rowMeta: { color: c.textMuted, fontSize: font.sizes.sm, marginTop: 2 },
+  menuBlock: { marginTop: spacing.lg },
+  sectionLabel: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: font.weights.semibold, marginBottom: spacing.sm, marginLeft: spacing.lg },
+  menuGroup: { marginHorizontal: spacing.lg, backgroundColor: c.bgElevated, borderRadius: radius.md, overflow: 'hidden' },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.md, paddingVertical: 14 },
+  menuLabel: { color: c.text, fontSize: font.sizes.base, fontWeight: font.weights.medium },
+  menuSub: { color: c.textMuted, fontSize: font.sizes.sm, marginTop: 2 },
+  matchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.md, paddingVertical: 14 },
+  matchTitle: { color: c.text, fontSize: font.sizes.base, fontWeight: font.weights.semibold },
+  matchMeta: { color: c.textMuted, fontSize: font.sizes.sm, marginTop: 2 },
+  matchStatus: { color: c.textSecondary, fontSize: font.sizes.sm, fontWeight: font.weights.semibold, marginRight: 6 },
 });

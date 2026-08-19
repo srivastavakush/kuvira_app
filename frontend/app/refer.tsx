@@ -38,7 +38,7 @@ export default function Refer() {
 
       <View style={{ padding: spacing.lg }}>
         <View style={styles.hero}>
-          <Ionicons name="gift" size={40} color={colors.brandPrimary} />
+          <View style={styles.giftIcon}><Ionicons name="gift-outline" size={26} color={colors.onSurface} /></View>
           <Text style={styles.heroTitle}>Earn ₹{data.reward_per_referral}</Text>
           <Text style={styles.heroSub}>for every friend who joins and plays their first game. They get ₹{data.reward_per_referral} too.</Text>
         </View>
@@ -75,19 +75,20 @@ const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.surface },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   title: { color: colors.onSurface, fontSize: font.sizes.xl, fontWeight: '900' },
-  hero: { backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandSecondary, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center' },
-  heroTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900', marginTop: spacing.sm },
-  heroSub: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, textAlign: 'center', marginTop: spacing.sm },
+  hero: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center' },
+  giftIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.surfaceTertiary, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
+  heroTitle: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', letterSpacing: -0.3 },
+  heroSub: { color: colors.onSurfaceMuted, fontSize: font.sizes.base, textAlign: 'center', marginTop: spacing.sm, lineHeight: 22 },
   label: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700', marginTop: spacing.xl, marginBottom: spacing.sm },
   codeBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.md, padding: spacing.md, borderStyle: 'dashed' },
-  code: { color: colors.brandPrimary, fontSize: font.sizes.xxl, fontWeight: '900', letterSpacing: 2 },
+  code: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', letterSpacing: 2 },
   copyBtn: { backgroundColor: colors.surfaceTertiary, paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.sm },
   copyText: { color: colors.onSurface, fontWeight: '700' },
   shareBtn: { flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.pill, marginTop: spacing.md },
   shareText: { color: colors.onBrandPrimary, fontWeight: '800', fontSize: font.sizes.lg },
   statsRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.lg },
   stat: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
-  statVal: { color: colors.brandPrimary, fontSize: font.sizes.xl, fontWeight: '900' },
+  statVal: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
   statLabel: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 2 },
   applyRow: { flexDirection: 'row', gap: spacing.sm },
   applyInput: { flex: 1, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, color: colors.onSurface, fontSize: font.sizes.base, paddingHorizontal: spacing.md, paddingVertical: spacing.md },

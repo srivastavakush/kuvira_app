@@ -36,7 +36,7 @@ export default function PlayerDetail() {
             <Text style={styles.meta}>{p.skill_level} · {p.area}, {p.city}</Text>
             {p.match_score != null && (
               <View style={styles.matchPill}>
-                <Text style={styles.matchPillText}>{p.match_score}% Match</Text>
+                <Text style={styles.matchPillText}>{p.match_score}% match</Text>
               </View>
             )}
           </View>
@@ -75,7 +75,7 @@ function Stat({ val, label }: { val: any; label: string }) {
   return <View style={styles.statBox}><Text style={styles.statVal}>{val}</Text><Text style={styles.statLabel}>{label}</Text></View>;
 }
 function Tag({ icon, text }: { icon: any; text: string }) {
-  return <View style={styles.tag}><Ionicons name={icon} size={14} color={colors.brandPrimary} /><Text style={styles.tagText}>{text}</Text></View>;
+  return <View style={styles.tag}><Ionicons name={icon} size={14} color={colors.onSurfaceSecondary} /><Text style={styles.tagText}>{text}</Text></View>;
 }
 
 const styles = StyleSheet.create({
@@ -86,12 +86,12 @@ const styles = StyleSheet.create({
   avatar: { width: 108, height: 108, borderRadius: 54, borderWidth: 3, borderColor: colors.brandPrimary, marginBottom: spacing.md },
   name: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900' },
   meta: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: 4 },
-  matchPill: { marginTop: spacing.md, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandPrimary, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radius.pill },
-  matchPillText: { color: colors.brandPrimary, fontWeight: '900', fontSize: font.sizes.base },
+  matchPill: { marginTop: spacing.md, backgroundColor: colors.surfaceTertiary, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.sm },
+  matchPillText: { color: colors.onSurface, fontWeight: '800', fontSize: font.sizes.sm, letterSpacing: 0.3 },
   body: { padding: spacing.lg },
   statsRow: { flexDirection: 'row', gap: spacing.md },
   statBox: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
-  statVal: { color: colors.brandPrimary, fontSize: font.sizes.xxl, fontWeight: '900' },
+  statVal: { color: colors.onSurface, fontSize: font.sizes.xl, fontWeight: '800', letterSpacing: -0.3 },
   statLabel: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 },
   sectionH: { color: colors.onSurface, fontSize: font.sizes.xl, fontWeight: '800', marginTop: spacing.xl, marginBottom: spacing.md },
   bio: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, lineHeight: 22 },
