@@ -14,11 +14,12 @@ from .court import ConfigurableCourtEstimator
 from .pose import YOLOPoseEstimator
 from .shot_classifier import ConfigurableShotClassifier
 from .trajectory import build_ball_trajectory, reconstruct_visibility_rallies
+from .event_segmentation import reconstruct_rallies_from_shots, segment_points_from_explicit_events
 
 
 class YOLO26Analyzer(VideoAnalyzer):
     name = "yolo26"
-    version = "0.3.0"
+    version = "0.4.0"
 
     def __init__(self, weights: Optional[str] = None, shot_model: Optional[str] = None):
         self.weights = weights or os.environ.get("AI_COACH_YOLO_WEIGHTS", "")
@@ -65,10 +66,12 @@ class YOLO26Analyzer(VideoAnalyzer):
         results = model.track(source=video_path, stream=True, persist=False, verbose=False)
         player_scores: list[float] = []
         ball_scores: list[float] = []
-        player_frames = ball_frames = sampled = 0
+        paddle_scores: list[float] = []
+        player_frames = ball_frames = paddle_frames = sampled = 0
         tracked_players = 0
         player_observations: list[dict[str, Any]] = []
         ball_observations: list[dict[str, Any]] = []
+        paddle_observations: list[dict[str, Any]] = []
         pose_confidences: list[float] = []
         court_confidences: list[float] = []
 
@@ -82,7 +85,7 @@ class YOLO26Analyzer(VideoAnalyzer):
             conf = boxes.conf.tolist() if getattr(boxes, "conf", None) is not None else []
             xyxy = boxes.xyxy.tolist() if getattr(boxes, "xyxy", None) is not None else []
             ids = boxes.id.tolist() if getattr(boxes, "id", None) is not None else [None] * len(cls)
-            frame_has_player = frame_has_ball = False
+            frame_has_player = frame_has_ball = frame_has_paddle = False
             frame_tracks = self.tracker.track(result)
             tracked_players += len(frame_tracks)
             for track in frame_tracks:
@@ -92,11 +95,15 @@ class YOLO26Analyzer(VideoAnalyzer):
                 label = str(names.get(int(c), int(c))).lower()
                 if label in {"person", "player"}:
                     player_scores.append(float(score)); frame_has_player = True
-                if label in {"sports ball", "ball", "pickleball"}:
+                elif label in {"sports ball", "ball", "pickleball"}:
                     ball_scores.append(float(score)); frame_has_ball = True
                     ball_observations.append({"frame": sampled, "bbox": box, "confidence": float(score), "source": "yolo26"})
+                elif label in {"paddle", "pickleball paddle", "racket", "racquet"}:
+                    paddle_scores.append(float(score)); frame_has_paddle = True
+                    paddle_observations.append({"frame": sampled, "bbox": box, "track_id": track_id, "confidence": float(score), "source": "yolo26"})
             player_frames += int(frame_has_player)
             ball_frames += int(frame_has_ball)
+            paddle_frames += int(frame_has_paddle)
 
             pose = self.pose.estimate(getattr(result, "orig_img", None))
             court = self.court.estimate(getattr(result, "orig_img", None), boxes)
@@ -107,7 +114,6 @@ class YOLO26Analyzer(VideoAnalyzer):
 
             if report_progress and n_total and sampled % max(1, n_total // 20) == 0:
                 try:
-                    # Analyzer is running in a worker thread; schedule the async callback safely.
                     loop = asyncio.get_running_loop()
                     loop.create_task(report_progress("cv_inference", min(0.90, sampled / max(1, n_total) * 0.90)))
                 except RuntimeError:
@@ -115,25 +121,33 @@ class YOLO26Analyzer(VideoAnalyzer):
 
         player_conf = sum(player_scores) / len(player_scores) if player_scores else 0.0
         ball_conf = sum(ball_scores) / len(ball_scores) if ball_scores else 0.0
+        paddle_conf = sum(paddle_scores) / len(paddle_scores) if paddle_scores else 0.0
         pose_conf = sum(pose_confidences) / len(pose_confidences) if pose_confidences else 0.0
         court_conf = sum(court_confidences) / len(court_confidences) if court_confidences else 0.0
 
         trajectory = build_ball_trajectory(ball_observations, fps)
         visibility_rallies = reconstruct_visibility_rallies(ball_observations, fps)
         shots = self.shot_classifier.classify(player_observations, fps=fps, sport=sport)
+        candidate_rallies = reconstruct_rallies_from_shots(shots, fps)
+        explicit_points = segment_points_from_explicit_events(shots, fps)
+        rallies = candidate_rallies or visibility_rallies
 
         missing: list[str] = []
         warnings: list[str] = []
         if not player_scores: missing.append("player_detection")
         if not ball_scores: missing.append("ball_detection")
+        if not paddle_scores: missing.append("paddle_detection")
         if not pose_confidences: missing.append("player_pose")
         if not court_confidences: missing.append("court_geometry")
         if not shots:
             missing.append("shot_classification")
             warnings.append("temporal_shot_model_not_producing_events")
-        if not visibility_rallies:
-            missing.append("rally_boundaries")
-            warnings.append("no_ball_visibility_rallies")
+        if not candidate_rallies:
+            missing.append("validated_rally_boundaries")
+            warnings.append("rally_boundaries_require_temporal_shot_events")
+        if not explicit_points:
+            missing.append("point_boundaries")
+            warnings.append("point_boundaries_require_explicit_point_events")
 
         shot_conf = max((float(s.get("confidence", 0.0)) for s in shots), default=0.0)
         critical = [player_conf, ball_conf, pose_conf, court_conf, shot_conf]
@@ -155,29 +169,35 @@ class YOLO26Analyzer(VideoAnalyzer):
             Metric(metric="video_duration", value=round(duration, 2), unit="s", source="video_metadata", confidence=0.98 if fps else 0.5),
             Metric(metric="player_detection_confidence", value=round(player_conf, 4), unit="confidence", source="yolo26_tracker", confidence=player_conf),
             Metric(metric="ball_detection_confidence", value=round(ball_conf, 4), unit="confidence", source="yolo26", confidence=ball_conf),
+            Metric(metric="paddle_detection_confidence", value=round(paddle_conf, 4), unit="confidence", source="yolo26", confidence=paddle_conf),
             Metric(metric="pose_confidence", value=round(pose_conf, 4), unit="confidence", source="yolo_pose", confidence=pose_conf),
             Metric(metric="court_geometry_confidence", value=round(court_conf, 4), unit="confidence", source="court_estimator", confidence=court_conf),
             Metric(metric="ball_track_coverage", value=float(trajectory.get("coverage", 0)), unit="observations", source="ball_track_trajectory", confidence=float(trajectory.get("confidence", 0.0))),
             Metric(metric="ball_mean_pixel_velocity", value=float(trajectory.get("mean_pixel_velocity", 0.0)), unit="px/s", source="ball_track_trajectory", confidence=float(trajectory.get("confidence", 0.0))),
-            Metric(metric="observable_rally_segments", value=float(len(visibility_rallies)), unit="segments", source="ball_track_continuity", confidence=min(1.0, float(trajectory.get("confidence", 0.0)))),
+            Metric(metric="candidate_rallies", value=float(len(candidate_rallies)), unit="rallies", source="temporal_shot_sequence", confidence=min((float(r.get("confidence",0.0)) for r in candidate_rallies), default=0.0)),
+            Metric(metric="explicit_points", value=float(len(explicit_points)), unit="points", source="explicit_point_events", confidence=min((float(p.get("confidence",0.0)) for p in explicit_points), default=0.0)),
         ]
         diagnostics = {
             "weights": self.weights,
             "tracked_player_observations": tracked_players,
             "player_frames": player_frames,
             "ball_frames": ball_frames,
+            "paddle_frames": paddle_frames,
             "pose_observations": len(pose_confidences),
             "court_observations": len(court_confidences),
             "shot_events": len(shots),
             "trajectory": trajectory,
             "visibility_rallies": len(visibility_rallies),
+            "candidate_rallies": len(candidate_rallies),
+            "explicit_points": len(explicit_points),
+            "paddle_observations": len(paddle_observations),
         }
         return AnalyzerResult(
             analyzer=self.name,
             analyzer_version=self.version,
             data_quality=dq,
             metrics=metrics,
-            rallies=visibility_rallies,
+            rallies=rallies,
             shots=shots,
             important_moments=[],
             diagnostics=diagnostics,
