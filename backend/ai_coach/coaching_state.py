@@ -5,9 +5,16 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-def now_iso() -> str: return datetime.now(timezone.utc).isoformat()
-def _norm(text: Any) -> str: return re.sub(r"\s+", " ", str(text or "").strip().lower())
-def _fingerprint(*parts: Any) -> str: return hashlib.sha256("|".join(_norm(x) for x in parts).encode("utf-8")).hexdigest()[:24]
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _norm(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+def _fingerprint(*parts: Any) -> str:
+    return hashlib.sha256("|".join(_norm(x) for x in parts).encode("utf-8")).hexdigest()[:24]
+
 def _unique_strings(values: List[Any], limit: int = 8) -> List[str]:
     out=[]; seen=set()
     for value in values:
@@ -15,6 +22,25 @@ def _unique_strings(values: List[Any], limit: int = 8) -> List[str]:
         if text and key not in seen: out.append(text); seen.add(key)
         if len(out)>=limit: break
     return out
+
+
+def _effectiveness(outcome: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(outcome, dict): return None
+    pre=outcome.get("pre_metrics") or {}; post=outcome.get("post_metrics") or {}; directions=outcome.get("desired_direction") or {}
+    per_metric={}; scores=[]
+    for name, before in pre.items():
+        after=post.get(name)
+        if not isinstance(before,(int,float)) or not isinstance(after,(int,float)): continue
+        direction=directions.get(name,"up")
+        delta=float(after)-float(before)
+        denominator=max(abs(float(before)),1e-9)
+        relative=delta/denominator
+        improved=relative > 0 if direction == "up" else relative < 0
+        per_metric[name]={"before":before,"after":after,"delta":round(delta,6),"relative_change":round(relative,6),"desired_direction":direction,"improved":improved}
+        scores.append(1.0 if improved else 0.0)
+    if not scores: return None
+    return {"score":round(sum(scores)/len(scores),4),"metrics":per_metric,"label":"effective" if sum(scores)/len(scores)>=0.5 else "ineffective"}
+
 
 class CoachingStateService:
     def __init__(self, db: Any): self.db = db
@@ -45,7 +71,7 @@ class CoachingStateService:
     async def assign_training(self,user_id:str,recommendation:Dict[str,Any],match_id:Optional[str]=None)->Dict[str,Any]:
         await self.ensure_indexes(); title=recommendation.get("title") or recommendation.get("focus") or "Training session"; fingerprint=recommendation.get("fingerprint") or _fingerprint(title,recommendation.get("description"),recommendation.get("target")); existing=await self.db.ai_coach_training.find_one({"user_id":user_id,"fingerprint":fingerprint,"status":{"$in":["assigned","in_progress"]}},{"_id":0})
         if existing: return existing
-        doc={"id":f"training-{int(datetime.now(timezone.utc).timestamp()*1000000)}","user_id":user_id,"match_id":match_id,"fingerprint":fingerprint,"title":title,"description":recommendation.get("description",""),"target":recommendation.get("target"),"status":"assigned","outcome":None,"created_at":now_iso(),"completed_at":None}; await self.db.ai_coach_training.insert_one(doc.copy()); return doc
+        doc={"id":f"training-{int(datetime.now(timezone.utc).timestamp()*1000000)}","user_id":user_id,"match_id":match_id,"recommendation_id":recommendation.get("id"),"fingerprint":fingerprint,"title":title,"description":recommendation.get("description",""),"target":recommendation.get("target"),"status":"assigned","outcome":None,"effectiveness":None,"created_at":now_iso(),"completed_at":None}; await self.db.ai_coach_training.insert_one(doc.copy()); return doc
     async def evolve_from_report(self,user_id:str,match_id:str,report:Dict[str,Any],data_quality:Optional[Dict[str,Any]]=None)->Dict[str,Any]:
         await self.ensure_indexes(); dq=data_quality or report.get("data_quality") or {}; overall=float(dq.get("overall_confidence",0.0) or 0.0); unavailable=set(report.get("unavailable") or []); evidence_gate=overall>=0.5 and not unavailable.intersection({"strengths_require_more_evidence","weaknesses_require_more_evidence","tactical_observations_require_more_evidence"}); state=await self.get_state(user_id); previous_weaknesses=list(state.get("recurring_weaknesses") or []); previous_improving=list(state.get("improving_areas") or []); strengths=_unique_strings(report.get("strengths") or []); weaknesses=_unique_strings(report.get("weaknesses") or []); drills=report.get("recommended_drills") or []
         transition={"match_id":match_id,"confidence":overall,"evidence_gate":evidence_gate,"strengths_count":len(strengths),"weaknesses_count":len(weaknesses),"drills_count":len(drills)}; await self.record_coaching_event(user_id,"match_report",transition)
@@ -55,14 +81,21 @@ class CoachingStateService:
             if not isinstance(drill,dict): continue
             recommendation=dict(drill); recommendation["fingerprint"]=_fingerprint(drill.get("title"),drill.get("description"),drill.get("target")); rec=await self.record_recommendation(user_id,match_id,recommendation); assignments.append(await self.assign_training(user_id,rec,match_id))
         all_training=await self.db.ai_coach_training.find({"user_id":user_id},{"_id":0}).sort("created_at",-1).to_list(100); outcomes=[x for x in all_training if x.get("outcome") is not None or x.get("status") in {"completed","skipped"}]; completion={"assigned":len(all_training),"completed":sum(x.get("status")=="completed" for x in all_training),"skipped":sum(x.get("status")=="skipped" for x in all_training)}; completion["completion_rate"]=round(completion["completed"]/completion["assigned"],4) if completion["assigned"] else 0.0
-        recommendations=await self.db.ai_coach_recommendations.find({"user_id":user_id},{"_id":0}).sort("created_at",-1).to_list(20)
-        new_state=await self.upsert_state(user_id,{"active_focus":focus,"strengths":strengths,"weaknesses":weaknesses,"recurring_weaknesses":recurring,"improving_areas":improving,"regressions":regressions,"previous_recommendations":recommendations,"training_assignments":all_training,"training_completion":completion,"training_outcomes":outcomes,"training_adherence":completion,"last_analyzed_match_id":match_id,"last_state_transition":transition})
+        recommendations=await self.db.ai_coach_recommendations.find({"user_id":user_id},{"_id":0}).sort("created_at",-1).to_list(20); effectiveness={}
+        for item in all_training:
+            if item.get("effectiveness") and item.get("fingerprint"): effectiveness[item["fingerprint"]]=item["effectiveness"]
+        new_state=await self.upsert_state(user_id,{"active_focus":focus,"strengths":strengths,"weaknesses":weaknesses,"recurring_weaknesses":recurring,"improving_areas":improving,"regressions":regressions,"previous_recommendations":recommendations,"training_assignments":all_training,"training_completion":completion,"training_outcomes":outcomes,"training_adherence":completion,"recommendation_effectiveness":effectiveness,"last_analyzed_match_id":match_id,"last_state_transition":transition})
         await self.record_coaching_event(user_id,"state_transition",{**transition,"active_focus":focus,"training_assignment_ids":[x["id"] for x in assignments]}); return {"state":new_state,"mutated":True,"training_assignments":assignments,"transition":transition}
     async def record_training_outcome(self,user_id:str,training_id:str,status:str,outcome:Optional[Dict[str,Any]]=None)->Optional[Dict[str,Any]]:
-        await self.ensure_indexes(); completed_at=now_iso() if status in {"completed","skipped"} else None; await self.db.ai_coach_training.update_one({"id":training_id,"user_id":user_id},{"$set":{"status":status,"outcome":outcome,"completed_at":completed_at,"updated_at":now_iso()}}); doc=await self.db.ai_coach_training.find_one({"id":training_id,"user_id":user_id},{"_id":0})
-        if doc: await self._refresh_adherence(user_id); await self.record_coaching_event(user_id,"training_outcome",{"training_id":training_id,"status":status,"outcome":outcome})
+        await self.ensure_indexes(); effectiveness=_effectiveness(outcome); completed_at=now_iso() if status in {"completed","skipped"} else None; update={"status":status,"outcome":outcome,"completed_at":completed_at,"updated_at":now_iso()};
+        if effectiveness is not None: update["effectiveness"]=effectiveness
+        await self.db.ai_coach_training.update_one({"id":training_id,"user_id":user_id},{"$set":update}); doc=await self.db.ai_coach_training.find_one({"id":training_id,"user_id":user_id},{"_id":0})
+        if doc:
+            await self._refresh_adherence(user_id); await self.record_coaching_event(user_id,"training_outcome",{"training_id":training_id,"status":status,"outcome":outcome,"effectiveness":effectiveness}); await self._refresh_effectiveness(user_id)
         return doc
     async def _refresh_adherence(self,user_id:str)->None:
         rows=await self.db.ai_coach_training.find({"user_id":user_id},{"_id":0,"status":1}).to_list(500); assigned=len(rows); completed=sum(r.get("status")=="completed" for r in rows); skipped=sum(r.get("status")=="skipped" for r in rows); rate=completed/assigned if assigned else 0.0; await self.upsert_state(user_id,{"training_adherence":{"assigned":assigned,"completed":completed,"skipped":skipped,"completion_rate":round(rate,4)}})
+    async def _refresh_effectiveness(self,user_id:str)->None:
+        rows=await self.db.ai_coach_training.find({"user_id":user_id,"effectiveness":{"$ne":None}},{"_id":0,"fingerprint":1,"effectiveness":1}).to_list(500); await self.upsert_state(user_id,{"recommendation_effectiveness":{r.get("fingerprint"):r.get("effectiveness") for r in rows if r.get("fingerprint")}})
     async def record_coaching_event(self,user_id:str,event_type:str,payload:Dict[str,Any])->None:
         await self.ensure_indexes(); await self.db.ai_coach_coaching_events.insert_one({"user_id":user_id,"type":event_type,"payload":payload,"created_at":now_iso()})
