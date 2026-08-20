@@ -23,6 +23,26 @@ export type Capabilities = {
   permissions: string[];
 };
 
+export const ROLE_PERMISSIONS: Record<Role, string[]> = {
+  PLAYER: [],
+  PLATFORM_ADMIN: [
+    'club.view', 'club.manage', 'club.courts.manage', 'club.bookings.manage',
+    'club.games.manage', 'club.events.manage', 'club.members.manage',
+    'club.staff.manage', 'club.ownership.transfer', 'club.analytics.view',
+    'platform.clubs.manage', 'platform.users.manage', 'platform.analytics.view',
+  ],
+  CLUB_OWNER: [
+    'club.view', 'club.manage', 'club.courts.manage', 'club.bookings.manage',
+    'club.games.manage', 'club.events.manage', 'club.members.manage',
+    'club.staff.manage', 'club.analytics.view',
+  ],
+  CLUB_MANAGER: [
+    'club.view', 'club.manage', 'club.courts.manage', 'club.bookings.manage',
+    'club.games.manage', 'club.events.manage', 'club.members.manage', 'club.analytics.view',
+  ],
+  CLUB_STAFF: ['club.view', 'club.bookings.manage', 'club.games.manage'],
+};
+
 export const EMPTY_CAPABILITIES: Capabilities = {
   roles: [ROLES.PLAYER],
   is_platform_admin: false,
@@ -58,5 +78,5 @@ export function canForOrg(
   if (!caps) return false;
   if (caps.is_platform_admin) return true;
   const membership = caps.organizations?.find((org) => org.org_id === orgId);
-  return !!membership && caps.permissions.includes(permission);
+  return !!membership && ROLE_PERMISSIONS[membership.role]?.includes(permission);
 }
