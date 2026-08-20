@@ -5,16 +5,18 @@ from deps import (
     ROLE_CLUB_MANAGER,
     ROLE_CLUB_STAFF,
     ROLE_PERMISSIONS,
+    PERM,
 )
 
 
 def test_role_permission_matrix_is_explicit():
     assert ROLE_PERMISSIONS[ROLE_PLAYER] == []
     assert 'club.staff.manage' in ROLE_PERMISSIONS[ROLE_CLUB_OWNER]
+    assert 'club.ownership.transfer' in ROLE_PERMISSIONS[ROLE_CLUB_OWNER]
     assert 'club.staff.manage' not in ROLE_PERMISSIONS[ROLE_CLUB_MANAGER]
     assert 'club.staff.manage' not in ROLE_PERMISSIONS[ROLE_CLUB_STAFF]
-    assert 'club.ownership.transfer' not in ROLE_PERMISSIONS[ROLE_CLUB_OWNER]
-    assert 'club.ownership.transfer' in ROLE_PERMISSIONS[ROLE_PLATFORM_ADMIN]
+    assert 'club.ownership.transfer' not in ROLE_PERMISSIONS[ROLE_CLUB_MANAGER]
+    assert 'club.ownership.transfer' not in ROLE_PERMISSIONS[ROLE_CLUB_STAFF]
 
 
 def test_manager_and_staff_cannot_escalate_privileges():
@@ -24,5 +26,4 @@ def test_manager_and_staff_cannot_escalate_privileges():
 
 
 def test_platform_admin_has_all_catalog_permissions():
-    from deps import PERM
     assert set(ROLE_PERMISSIONS[ROLE_PLATFORM_ADMIN]) == set(PERM.keys())
