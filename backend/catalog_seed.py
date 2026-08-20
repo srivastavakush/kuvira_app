@@ -14,7 +14,8 @@ from pymongo import UpdateOne
 from deps import db, require_platform_admin, KuviraError, log
 from seed_data import SPORTS, FACILITIES, PLAYERS, COACHES, EVENTS, TOURNAMENTS, GAMES, PRODUCTS
 
-router = APIRouter(prefix="/api/admin/catalog", tags=["admin-catalog"])
+# org_admin.router already has /api as its prefix. Keep this router relative.
+router = APIRouter(prefix="/admin/catalog", tags=["admin-catalog"])
 
 CATALOGS: Dict[str, tuple[str, Iterable[dict[str, Any]]]] = {
     "sports": ("sports", SPORTS),
@@ -40,25 +41,16 @@ def _clean_document(doc: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
-def _operations(items: Iterable[dict[str, Any]], *, dry_run: bool) -> list[UpdateOne]:
+def _operations(items: Iterable[dict[str, Any]]) -> list[UpdateOne]:
     ops: list[UpdateOne] = []
     for raw in items:
         doc = _clean_document(raw)
         stable_id = doc.get("id")
         if not stable_id:
             raise KuviraError(500, "CATALOG_INVALID", "Catalog record is missing a stable id")
-        if dry_run:
-            continue
-        # $setOnInsert preserves generated/operational fields on records that
-        # already exist; $set refreshes the canonical catalog content (including
-        # image URLs) from source-controlled seed data.
-        ops.append(
-            UpdateOne(
-                {"id": stable_id},
-                {"$set": doc},
-                upsert=True,
-            )
-        )
+        # The catalog source is authoritative for catalog fields (including
+        # image URLs); unrelated collections are never touched by this router.
+        ops.append(UpdateOne({"id": stable_id}, {"$set": doc}, upsert=True))
     return ops
 
 
@@ -87,7 +79,7 @@ async def seed_catalog(
     """Upsert source-controlled catalog data into production.
 
     Example:
-      POST /api/admin/catalog/seed?catalogs=sports,facilities,events,products
+      POST /api/admin/catalog/seed?catalogs=facilities,events,products
 
     `dry_run=true` performs no writes and only validates the selected catalogs.
     """
@@ -122,8 +114,7 @@ async def seed_catalog(
         if dry_run:
             continue
 
-        ops = _operations(records, dry_run=False)
-        result = await db[collection_name].bulk_write(ops, ordered=False)
+        result = await db[collection_name].bulk_write(_operations(records), ordered=False)
         summary["collections"][key].update({
             "matched": result.matched_count,
             "modified": result.modified_count,
@@ -132,3 +123,9 @@ async def seed_catalog(
 
     log.info("Catalog seed complete dry_run=%s catalogs=%s", dry_run, requested)
     return summary
+
+
+# server.py already mounts org_admin.router. Attach this sub-router to that
+# existing authenticated admin router without changing application wiring.
+import org_admin as _org_admin  # noqa: E402
+_org_admin.router.include_router(router)
