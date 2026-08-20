@@ -16,9 +16,6 @@ from deps import (
 
 router = APIRouter(prefix="/api")
 
-# ===========================================================================
-# Models
-# ===========================================================================
 class ClubCreate(BaseModel):
     name: str
     city: str
@@ -33,6 +30,13 @@ class AssignOwner(BaseModel):
 class AddStaff(BaseModel):
     mobile: str
     role: str
+
+class MemberRoleUpdate(BaseModel):
+    role: str
+
+class OwnershipTransfer(BaseModel):
+    mobile: str
+    name: Optional[str] = None
 
 class ClubUpdate(BaseModel):
     name: Optional[str] = None
@@ -67,9 +71,6 @@ class FacilityUpdate(BaseModel):
     amenities: Optional[List[str]] = None
     is_experience_center: Optional[bool] = None
 
-# ===========================================================================
-# PLATFORM ADMIN — club & owner provisioning
-# ===========================================================================
 @router.get("/admin/clubs")
 async def admin_list_clubs(admin=Depends(require_platform_admin())):
     return await db.organizations.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
@@ -162,17 +163,11 @@ async def admin_update_facility(org_id: str, facility_id: str, body: FacilityUpd
 
 @router.delete("/admin/clubs/{org_id}/facilities/{facility_id}")
 async def admin_delete_facility(org_id: str, facility_id: str, admin=Depends(require_platform_admin())):
-    result = await db.facilities.update_one(
-        {"id": facility_id, "org_id": org_id},
-        {"$set": {"status": "inactive", "updated_at": utcnow().isoformat()}},
-    )
+    result = await db.facilities.update_one({"id": facility_id, "org_id": org_id}, {"$set": {"status": "inactive", "updated_at": utcnow().isoformat()}})
     if result.matched_count == 0:
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
     return {"deleted": True}
 
-# ===========================================================================
-# CLUB WORKSPACE — org-scoped, permission-checked
-# ===========================================================================
 async def _org_facility_ids(org_id: str) -> List[str]:
     facs = await db.facilities.find({"org_id": org_id}, {"_id": 0, "id": 1}).to_list(200)
     return [f["id"] for f in facs]
@@ -227,10 +222,7 @@ async def org_update_facility(org_id: str, facility_id: str, body: FacilityUpdat
 
 @router.delete("/orgs/{org_id}/facilities/{facility_id}")
 async def org_delete_facility(org_id: str, facility_id: str, user=Depends(require_org_permission("club.courts.manage"))):
-    result = await db.facilities.update_one(
-        {"id": facility_id, "org_id": org_id},
-        {"$set": {"status": "inactive", "updated_at": utcnow().isoformat()}},
-    )
+    result = await db.facilities.update_one({"id": facility_id, "org_id": org_id}, {"$set": {"status": "inactive", "updated_at": utcnow().isoformat()}})
     if result.matched_count == 0:
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
     return {"deleted": True}
@@ -261,15 +253,48 @@ async def add_staff(org_id: str, body: AddStaff, user=Depends(require_org_permis
     staff_user = await _get_or_invite_user(body.mobile, None)
     existing = await db.organization_memberships.find_one({"user_id": staff_user["id"], "org_id": org_id})
     if existing:
-        await db.organization_memberships.update_one(
-            {"user_id": staff_user["id"], "org_id": org_id}, {"$set": {"role": body.role, "status": "active"}}
-        )
+        await db.organization_memberships.update_one({"user_id": staff_user["id"], "org_id": org_id}, {"$set": {"role": body.role, "status": "active"}})
     else:
-        await db.organization_memberships.insert_one({
-            "id": gen_id(), "user_id": staff_user["id"], "org_id": org_id,
-            "role": body.role, "status": "active", "created_at": utcnow().isoformat(),
-        })
+        await db.organization_memberships.insert_one({"id": gen_id(), "user_id": staff_user["id"], "org_id": org_id, "role": body.role, "status": "active", "created_at": utcnow().isoformat()})
     return {"added": True, "user_id": staff_user["id"], "role": body.role}
+
+@router.patch("/orgs/{org_id}/members/{member_user_id}/role")
+async def update_member_role(org_id: str, member_user_id: str, body: MemberRoleUpdate, user=Depends(require_org_permission("club.staff.manage"))):
+    if body.role not in (ROLE_CLUB_MANAGER, ROLE_CLUB_STAFF):
+        raise KuviraError(400, "INVALID_ROLE", "Role must be CLUB_MANAGER or CLUB_STAFF")
+    membership = await db.organization_memberships.find_one({"user_id": member_user_id, "org_id": org_id, "status": "active"}, {"_id": 0})
+    if not membership:
+        raise KuviraError(404, "MEMBER_NOT_FOUND", "Active club member not found")
+    if membership.get("role") == ROLE_CLUB_OWNER:
+        raise KuviraError(409, "OWNER_ROLE_PROTECTED", "Club ownership must be transferred explicitly")
+    await db.organization_memberships.update_one({"user_id": member_user_id, "org_id": org_id, "status": "active"}, {"$set": {"role": body.role, "updated_at": utcnow().isoformat()}})
+    return {"updated": True, "user_id": member_user_id, "role": body.role}
+
+@router.delete("/orgs/{org_id}/members/{member_user_id}")
+async def remove_member(org_id: str, member_user_id: str, user=Depends(require_org_permission("club.staff.manage"))):
+    membership = await db.organization_memberships.find_one({"user_id": member_user_id, "org_id": org_id, "status": "active"}, {"_id": 0})
+    if not membership:
+        raise KuviraError(404, "MEMBER_NOT_FOUND", "Active club member not found")
+    if membership.get("role") == ROLE_CLUB_OWNER:
+        raise KuviraError(409, "OWNER_ROLE_PROTECTED", "Club ownership must be transferred explicitly")
+    await db.organization_memberships.update_one({"user_id": member_user_id, "org_id": org_id, "status": "active"}, {"$set": {"status": "inactive", "updated_at": utcnow().isoformat()}})
+    return {"removed": True, "user_id": member_user_id}
+
+@router.post("/orgs/{org_id}/ownership/transfer")
+async def transfer_ownership(org_id: str, body: OwnershipTransfer, user=Depends(require_org_permission("club.ownership.transfer"))):
+    org = await db.organizations.find_one({"id": org_id}, {"_id": 0, "id": 1, "name": 1})
+    if not org:
+        raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
+    target = await _get_or_invite_user(body.mobile, body.name)
+    current_owner = await db.organization_memberships.find_one({"org_id": org_id, "role": ROLE_CLUB_OWNER, "status": "active"}, {"_id": 0})
+    existing_target = await db.organization_memberships.find_one({"user_id": target["id"], "org_id": org_id})
+    if existing_target:
+        await db.organization_memberships.update_one({"user_id": target["id"], "org_id": org_id}, {"$set": {"role": ROLE_CLUB_OWNER, "status": "active", "updated_at": utcnow().isoformat()}})
+    else:
+        await db.organization_memberships.insert_one({"id": gen_id(), "user_id": target["id"], "org_id": org_id, "role": ROLE_CLUB_OWNER, "status": "active", "created_at": utcnow().isoformat()})
+    if current_owner and current_owner.get("user_id") != target["id"]:
+        await db.organization_memberships.update_one({"user_id": current_owner["user_id"], "org_id": org_id}, {"$set": {"role": ROLE_CLUB_MANAGER, "status": "active", "updated_at": utcnow().isoformat()}})
+    return {"transferred": True, "org_id": org_id, "new_owner_user_id": target["id"], "previous_owner_user_id": current_owner.get("user_id") if current_owner else None}
 
 @router.get("/orgs/{org_id}/analytics")
 async def org_analytics(org_id: str, user=Depends(require_org_permission("club.analytics.view"))):
@@ -278,10 +303,4 @@ async def org_analytics(org_id: str, user=Depends(require_org_permission("club.a
     revenue = sum(b.get("price", 0) for b in bookings)
     games = await db.games.count_documents({"facility_id": {"$in": fids}})
     members = await db.organization_memberships.count_documents({"org_id": org_id, "status": "active"})
-    return {
-        "bookings_count": len(bookings),
-        "revenue": revenue,
-        "games_count": games,
-        "members_count": members,
-        "facilities_count": len(fids),
-    }
+    return {"bookings_count": len(bookings), "revenue": revenue, "games_count": games, "members_count": members, "facilities_count": len(fids)}
