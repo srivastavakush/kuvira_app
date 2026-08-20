@@ -8,17 +8,17 @@ from typing import Any, Dict, Optional
 
 from .providers import AIProvider, get_default_provider
 from .retriever import KnowledgeRetriever
-from .agent.workflow import AgenticCoachWorkflow
+from .agent.coaching_tools import LongitudinalCoachWorkflow
 
 
 class CoachWorkflow:
     def __init__(self, provider: Optional[AIProvider] = None, retriever: Optional[KnowledgeRetriever] = None):
         self.provider = provider or get_default_provider()
         self.retriever = retriever
-        self.agent: Optional[AgenticCoachWorkflow] = None
+        self.agent: Optional[LongitudinalCoachWorkflow] = None
         db = getattr(retriever, "db", None)
         if db is not None:
-            self.agent = AgenticCoachWorkflow(db=db, provider=self.provider, retriever=retriever)
+            self.agent = LongitudinalCoachWorkflow(db=db, provider=self.provider, retriever=retriever)
 
     async def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         if self.agent is None:
@@ -44,6 +44,7 @@ class CoachWorkflow:
             "intent": result.get("intent"),
             "player_profile": result.get("player_context", state.get("player_profile", {})),
             "match_analytics": result.get("match_analytics", analytics),
+            "coaching_state": result.get("coaching_state", {}),
             "retrieved_evidence": result.get("knowledge", []),
             "agent": {
                 "plan": result.get("plan", []), "tool_calls": result.get("tool_calls", []),
