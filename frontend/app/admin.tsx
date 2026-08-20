@@ -10,8 +10,7 @@ import { useSession } from '@/src/session';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const { user } = useSession();
-  const [caps, setCaps] = useState<any>(null);
+  const { user, capabilities, refresh } = useSession();
   const [clubs, setClubs] = useState<any[]>([]);
   const [selectedClub, setSelectedClub] = useState<any>(null);
   const [facilities, setFacilities] = useState<any[]>([]);
@@ -27,10 +26,10 @@ export default function AdminDashboard() {
   const [price, setPrice] = useState('500');
   const [busy, setBusy] = useState(false);
 
+  const isAdmin = capabilities.is_platform_admin;
+
   const load = async () => {
-    const c = await api.capabilities().catch(() => null);
-    setCaps(c);
-    if (!c?.is_platform_admin) return;
+    if (!isAdmin) return;
     const data = await api.adminClubs();
     setClubs(data || []);
     if (selectedClub) {
@@ -40,13 +39,14 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => { load().catch(() => {}); }, []);
+  useEffect(() => { refresh().then(() => load()).catch(() => {}); }, [refresh]);
 
-  if (!caps?.is_platform_admin) {
-    return <SafeAreaView style={styles.center}><Ionicons name="lock-closed" size={40} color={colors.error} /><Text style={styles.title}>Admin access required</Text><Text style={styles.muted}>This area is only available to platform administrators.</Text><Pressable onPress={() => router.back()} style={styles.primary}><Text style={styles.primaryText}>Go back</Text></Pressable></SafeAreaView>;
+  if (!isAdmin) {
+    return <SafeAreaView style={styles.center}><Ionicons name="lock-closed" size={40} color={colors.error} /><Text style={styles.title}>Admin access required</Text><Text style={styles.muted}>Your backend role does not include platform administration.</Text><Pressable onPress={() => router.back()} style={styles.primary}><Text style={styles.primaryText}>Go back</Text></Pressable></SafeAreaView>;
   }
 
   async function createClub() {
+    if (!capabilities.permissions.includes('platform.clubs.manage')) return Alert.alert('Permission denied', 'Your current role cannot manage clubs.');
     if (!clubName.trim() || !clubCity.trim()) return Alert.alert('Missing details', 'Enter club name and city.');
     setBusy(true);
     try {
@@ -58,17 +58,19 @@ export default function AdminDashboard() {
   }
 
   async function createFacility() {
-    if (!selectedClub || !facilityName.trim() || !facilityArea.trim() || !facilityCity.trim()) return Alert.alert('Missing details', 'Enter facility name, area and city.');
+    if (!selectedClub || !capabilities.permissions.includes('platform.clubs.manage')) return Alert.alert('Permission denied', 'Your current role cannot manage club facilities from platform admin.');
+    if (!facilityName.trim() || !facilityArea.trim() || !facilityCity.trim()) return Alert.alert('Missing details', 'Enter facility name, area and city.');
     setBusy(true);
     try {
       await api.adminCreateFacility(selectedClub.id, { name: facilityName.trim(), city: facilityCity.trim(), area: facilityArea.trim(), courts_count: Number(courts) || 1, price_per_hour: Number(price) || 500, sports: ['sport-pickleball'], amenities: [], description: '' });
       setFacilityName(''); setFacilityArea(''); setFacilityCity(''); setCourts('1'); setPrice('500'); setShowFacilityForm(false);
       setFacilities(await api.adminFacilities(selectedClub.id));
-      Alert.alert('Facility added', 'The court/facility is now part of this club and will be returned by the public facilities API.');
+      Alert.alert('Facility added', 'The facility is now part of this club.');
     } catch (e: any) { Alert.alert('Unable to add facility', e.message); } finally { setBusy(false); }
   }
 
   async function deactivateFacility(id: string) {
+    if (!capabilities.permissions.includes('platform.clubs.manage')) return Alert.alert('Permission denied', 'Your current role cannot deactivate facilities.');
     Alert.alert('Deactivate facility?', 'It will no longer appear as an active public facility.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Deactivate', style: 'destructive', onPress: async () => { try { await api.adminDeleteFacility(selectedClub.id, id); setFacilities(await api.adminFacilities(selectedClub.id)); } catch (e: any) { Alert.alert('Failed', e.message); } } },
@@ -79,20 +81,16 @@ export default function AdminDashboard() {
     <SafeAreaView style={styles.wrap}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.top}><Pressable onPress={() => router.back()}><Ionicons name="arrow-back" size={24} color={colors.onSurface} /></Pressable><View style={{ flex: 1 }}><Text style={styles.eyebrow}>KUVIRA</Text><Text style={styles.heading}>Platform Admin</Text></View><Ionicons name="shield-checkmark" size={26} color={colors.brandPrimary} /></View>
-
-        <Card style={styles.adminCard}><Text style={styles.cardTitle}>Administrator controls</Text><Text style={styles.muted}>Logged in as {user?.mobile || user?.name || 'administrator'}. Roles are determined by the backend; there is no role selector.</Text></Card>
-
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Clubs</Text><Pressable onPress={() => setShowClubForm(!showClubForm)} style={styles.smallPrimary}><Ionicons name="add" size={18} color={colors.onBrandPrimary} /><Text style={styles.smallPrimaryText}>Add club</Text></Pressable></View>
+        <Card style={styles.adminCard}><Text style={styles.cardTitle}>Administrator controls</Text><Text style={styles.muted}>Logged in as {user?.mobile || user?.name || 'administrator'}. Capabilities are determined by the backend.</Text></Card>
+        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Clubs</Text>{capabilities.permissions.includes('platform.clubs.manage') && <Pressable onPress={() => setShowClubForm(!showClubForm)} style={styles.smallPrimary}><Ionicons name="add" size={18} color={colors.onBrandPrimary} /><Text style={styles.smallPrimaryText}>Add club</Text></Pressable>}</View>
         {showClubForm && <Card style={styles.form}><TextInput placeholder="Club name" placeholderTextColor={colors.onSurfaceMuted} value={clubName} onChangeText={setClubName} style={styles.input} /><TextInput placeholder="City" placeholderTextColor={colors.onSurfaceMuted} value={clubCity} onChangeText={setClubCity} style={styles.input} /><TextInput placeholder="Owner mobile (optional)" placeholderTextColor={colors.onSurfaceMuted} value={ownerMobile} onChangeText={setOwnerMobile} keyboardType="phone-pad" style={styles.input} /><Pressable disabled={busy} onPress={createClub} style={styles.primary}><Text style={styles.primaryText}>{busy ? 'Creating…' : 'Create club'}</Text></Pressable></Card>}
-
         {clubs.length === 0 && <Card><Text style={styles.muted}>No clubs created yet.</Text></Card>}
         {clubs.map((club) => <Pressable key={club.id} onPress={async () => { setSelectedClub(club); setFacilities(await api.adminFacilities(club.id)); }} style={[styles.clubRow, selectedClub?.id === club.id && styles.selectedRow]}><View style={styles.clubIcon}><Ionicons name="business" size={20} color={colors.brandPrimary} /></View><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{club.name}</Text><Text style={styles.muted}>{club.city} · {club.status || 'active'}</Text></View><Ionicons name="chevron-forward" size={18} color={colors.onSurfaceMuted} /></Pressable>)}
-
         {selectedClub && <View style={{ marginTop: spacing.xl }}>
-          <View style={styles.sectionHead}><View><Text style={styles.sectionTitle}>{selectedClub.name}</Text><Text style={styles.muted}>Facilities & courts</Text></View><Pressable onPress={() => setShowFacilityForm(!showFacilityForm)} style={styles.smallPrimary}><Ionicons name="add" size={18} color={colors.onBrandPrimary} /><Text style={styles.smallPrimaryText}>Add court</Text></Pressable></View>
+          <View style={styles.sectionHead}><View><Text style={styles.sectionTitle}>{selectedClub.name}</Text><Text style={styles.muted}>Facilities & courts</Text></View>{capabilities.permissions.includes('platform.clubs.manage') && <Pressable onPress={() => setShowFacilityForm(!showFacilityForm)} style={styles.smallPrimary}><Ionicons name="add" size={18} color={colors.onBrandPrimary} /><Text style={styles.smallPrimaryText}>Add court</Text></Pressable>}</View>
           {showFacilityForm && <Card style={styles.form}><TextInput placeholder="Facility / venue name" placeholderTextColor={colors.onSurfaceMuted} value={facilityName} onChangeText={setFacilityName} style={styles.input} /><TextInput placeholder="Area / locality" placeholderTextColor={colors.onSurfaceMuted} value={facilityArea} onChangeText={setFacilityArea} style={styles.input} /><TextInput placeholder="City" placeholderTextColor={colors.onSurfaceMuted} value={facilityCity} onChangeText={setFacilityCity} style={styles.input} /><View style={styles.two}><TextInput placeholder="Courts" placeholderTextColor={colors.onSurfaceMuted} value={courts} onChangeText={setCourts} keyboardType="numeric" style={[styles.input, { flex: 1 }]} /><TextInput placeholder="₹ / hour" placeholderTextColor={colors.onSurfaceMuted} value={price} onChangeText={setPrice} keyboardType="numeric" style={[styles.input, { flex: 1 }]} /></View><Pressable disabled={busy} onPress={createFacility} style={styles.primary}><Text style={styles.primaryText}>{busy ? 'Adding…' : 'Add facility'}</Text></Pressable></Card>}
           {facilities.length === 0 && <Card><Text style={styles.muted}>No facilities yet.</Text></Card>}
-          {facilities.map((f) => <View key={f.id} style={styles.facilityRow}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{f.name}</Text><Text style={styles.muted}>{f.area}, {f.city} · {f.courts_count} court(s) · ₹{f.price_per_hour}/hr</Text></View><Pressable onPress={() => deactivateFacility(f.id)} style={styles.danger}><Ionicons name="trash-outline" size={18} color={colors.error} /></Pressable></View>)}
+          {facilities.map((f) => <View key={f.id} style={styles.facilityRow}><View style={{ flex: 1 }}><Text style={styles.rowTitle}>{f.name}</Text><Text style={styles.muted}>{f.area}, {f.city} · {f.courts_count} court(s) · ₹{f.price_per_hour}/hr</Text></View>{capabilities.permissions.includes('platform.clubs.manage') && <Pressable onPress={() => deactivateFacility(f.id)} style={styles.danger}><Ionicons name="trash-outline" size={18} color={colors.error} /></Pressable>}</View>)}
         </View>}
       </ScrollView>
     </SafeAreaView>
