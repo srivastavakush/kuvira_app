@@ -15,14 +15,19 @@ from .graph import CoachWorkflow
 from .coaching_state import CoachingStateService
 from .agent.chat_workflow import AgenticChatWorkflow
 from .infra import RateLimiter
+from .distributed_limits import MongoRateLimiter
 from .storage import ObjectStorage
 
 log = logging.getLogger("kuvira.ai_coach")
 router = APIRouter(prefix="/api/ai-coach", tags=["ai-coach"])
 MAX_VIDEO_BYTES = int(os.environ.get("AI_COACH_MAX_VIDEO_MB", "500")) * 1024 * 1024
 ALLOWED_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
-_CHAT_LIMITER = RateLimiter(int(os.environ.get("AI_COACH_CHAT_RATE_LIMIT", "20")), 60)
-_ANALYZE_LIMITER = RateLimiter(int(os.environ.get("AI_COACH_ANALYZE_RATE_LIMIT", "5")), 3600)
+_CHAT_LIMIT = int(os.environ.get("AI_COACH_CHAT_RATE_LIMIT", "20"))
+_ANALYZE_LIMIT = int(os.environ.get("AI_COACH_ANALYZE_RATE_LIMIT", "5"))
+_CHAT_LIMITER = RateLimiter(_CHAT_LIMIT, 60)
+_ANALYZE_LIMITER = RateLimiter(_ANALYZE_LIMIT, 3600)
+_CHAT_DISTRIBUTED = None
+_ANALYZE_DISTRIBUTED = None
 
 
 def _iso(): return datetime.now(timezone.utc).isoformat()
@@ -49,6 +54,22 @@ def _get_storage():
     global _storage
     if _storage is None: _storage = ObjectStorage()
     return _storage
+
+async def _allow_chat(user_id: str) -> bool:
+    global _CHAT_DISTRIBUTED
+    if os.environ.get("AI_COACH_RATE_LIMIT_BACKEND", "process").lower() != "mongo":
+        return _CHAT_LIMITER.allow(user_id)
+    if _CHAT_DISTRIBUTED is None:
+        _CHAT_DISTRIBUTED = MongoRateLimiter(db, limit=_CHAT_LIMIT, window_seconds=60)
+    return await _CHAT_DISTRIBUTED.allow(user_id)
+
+async def _allow_analysis(user_id: str) -> bool:
+    global _ANALYZE_DISTRIBUTED
+    if os.environ.get("AI_COACH_RATE_LIMIT_BACKEND", "process").lower() != "mongo":
+        return _ANALYZE_LIMITER.allow(user_id)
+    if _ANALYZE_DISTRIBUTED is None:
+        _ANALYZE_DISTRIBUTED = MongoRateLimiter(db, limit=_ANALYZE_LIMIT, window_seconds=3600)
+    return await _ANALYZE_DISTRIBUTED.allow(user_id)
 
 async def _ensure_indexes():
     await db.ai_coach_matches.create_index("user_id")
@@ -82,11 +103,13 @@ async def upload_video(file: UploadFile=File(...), match_id: Optional[str]=Form(
         raise HTTPException(413,"Video exceeds configured limit")
     video_id=gen_id(); storage=_get_storage()
     try:
-        stored=await asyncio.to_thread(storage.put, file.file, video_id, ext or ".mp4")
+        stored=await asyncio.to_thread(storage.put, file.file, video_id, ext or ".mp4", MAX_VIDEO_BYTES)
+    except ValueError:
+        raise HTTPException(413,"Video exceeds configured limit")
     except Exception as exc:
         log.exception("video storage failed")
         raise HTTPException(503,f"Video storage unavailable: {str(exc)[:120]}")
-    size_bytes=int(file.headers.get("content-length", 0)) if file.headers else 0
+    size_bytes=int(stored.get("size_bytes", 0))
     doc={"id":video_id,"user_id":user["id"],"match_id":match_id,"original_filename":file.filename or "video","mime_type":file.content_type,"size_bytes":size_bytes,"storage":stored,"storage_backend":stored.get("backend"),"created_at":_iso()}
     await db.ai_coach_videos.insert_one(doc.copy())
     if match_id: await db.ai_coach_matches.update_one({"id":match_id,"user_id":user["id"]},{"$set":{"video_id":video_id}})
@@ -94,7 +117,7 @@ async def upload_video(file: UploadFile=File(...), match_id: Optional[str]=Form(
 
 @router.post("/analyze")
 async def start_analysis(body: AnalyzeBody, user=Depends(current_user), idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")):
-    if not _ANALYZE_LIMITER.allow(user["id"]): raise HTTPException(429,"Analysis rate limit exceeded")
+    if not await _allow_analysis(user["id"]): raise HTTPException(429,"Analysis rate limit exceeded")
     match=await db.ai_coach_matches.find_one({"id":body.match_id,"user_id":user["id"]}); video=await db.ai_coach_videos.find_one({"id":body.video_id,"user_id":user["id"]})
     if not match: raise HTTPException(404,"Match not found")
     if not video: raise HTTPException(404,"Video not found")
@@ -105,8 +128,6 @@ async def start_analysis(body: AnalyzeBody, user=Depends(current_user), idempote
     if active: return active
     job={"id":gen_id(),"user_id":user["id"],"match_id":body.match_id,"video_id":body.video_id,"status":"queued","stage":"queued","progress":0.0,"analyzer":os.environ.get("AI_COACH_ANALYZER","lightweight"),"sport":match.get("sport","pickleball"),"created_at":_iso(),"diagnostics":{},"idempotency_key":idempotency_key,"attempts":0,"locked_at":None,"locked_by":None}
     await db.ai_coach_jobs.insert_one(job.copy()); await db.ai_coach_matches.update_one({"id":body.match_id,"user_id":user["id"]},{"$set":{"analysis_job_id":job["id"]}})
-    # Mongo job record is durable. A configured external queue may claim it; the
-    # local fallback keeps development behavior without changing the contract.
     if os.environ.get("AI_COACH_QUEUE_BACKEND", "local").lower() == "local":
         asyncio.create_task(run_analysis_job(db,job["id"]))
     job.pop("_id",None); return job
@@ -165,7 +186,7 @@ async def training_outcome(training_id:str,body:TrainingOutcomeBody,user=Depends
 
 @router.post("/chat")
 async def chat(body:ChatBody,user=Depends(current_user)):
-    if not _CHAT_LIMITER.allow(user["id"]): raise HTTPException(429,"Chat rate limit exceeded")
+    if not await _allow_chat(user["id"]): raise HTTPException(429,"Chat rate limit exceeded")
     sid=body.session_id or f"coach-{user['id']}"
     try: result=await _get_chat_workflow().run_chat(user_id=user["id"],message=body.text,session_id=sid,match_id=body.match_id,video_id=body.video_id,sport="pickleball")
     except Exception as e: log.exception("agentic chat failed"); raise HTTPException(502,f"Coach model unavailable: {str(e)[:120]}")
