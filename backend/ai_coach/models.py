@@ -1,7 +1,8 @@
 """Pydantic schemas for the AI Coach domain.
 
-Every numerical metric carries `source` + `confidence` so downstream consumers
-can distinguish verified fact from inference. See product spec.
+Every numerical metric carries source + confidence so downstream consumers can
+distinguish verified fact from inference. CV-specific sources are explicitly
+enumerated rather than being accepted as arbitrary strings.
 """
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Literal
@@ -17,6 +18,9 @@ JobStatus = Literal["queued", "processing", "completed", "failed"]
 AnalyticSource = Literal[
     "video_metadata", "video_estimation", "paddle_imu",
     "player_history", "self_report", "coach_input", "unavailable",
+    "yolo26", "yolo26_tracker", "yolo_pose", "court_estimator",
+    "ball_track_trajectory", "ball_track_continuity", "temporal_shot_sequence",
+    "explicit_point_events",
 ]
 
 
@@ -25,18 +29,18 @@ class Metric(BaseModel):
     value: Optional[float] = None
     unit: Optional[str] = None
     source: AnalyticSource = "unavailable"
-    confidence: float = 0.0  # 0..1
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     note: Optional[str] = None
 
 
 class MatchCreate(BaseModel):
     sport: str = "pickleball"
     player_level: Optional[str] = None
-    result: Optional[str] = None            # "win" | "loss" | "draw" | None
+    result: Optional[str] = None
     opponent_name: Optional[str] = None
     opponent_level: Optional[str] = None
     notes: Optional[str] = None
-    played_at: Optional[str] = None         # ISO date
+    played_at: Optional[str] = None
 
 
 class MatchDoc(MatchCreate):
@@ -59,7 +63,8 @@ class VideoDoc(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     fps: Optional[float] = None
-    storage_path: str
+    storage_path: Optional[str] = None
+    storage: Optional[Dict[str, Any]] = None
     created_at: str = Field(default_factory=_now)
 
 
@@ -69,12 +74,14 @@ class AnalysisJobDoc(BaseModel):
     match_id: str
     video_id: str
     status: JobStatus = "queued"
-    stage: str = "queued"           # human-readable current stage
-    progress: float = 0.0           # 0..1
+    stage: str = "queued"
+    progress: float = Field(default=0.0, ge=0.0, le=1.0)
     error: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
-    analyzer: str = "lightweight"   # analyzer id used
+    analyzer: str = "lightweight"
+    analyzer_version: Optional[str] = None
+    attempts: int = 0
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=_now)
 
@@ -83,13 +90,16 @@ class DataQuality(BaseModel):
     frames_sampled: int = 0
     duration_sec: float = 0.0
     resolution: Optional[str] = None
-    motion_signal: Optional[float] = None       # aggregate motion magnitude
-    player_tracking_confidence: float = 0.0     # 0 if not detected
-    ball_tracking_confidence: float = 0.0
-    shot_classification_confidence: float = 0.0
+    motion_signal: Optional[float] = None
+    player_tracking_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    ball_tracking_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    paddle_detection_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    pose_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    court_geometry_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    shot_classification_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     missing: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
-    overall_confidence: float = 0.0             # 0..1
+    overall_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class MatchAnalytics(BaseModel):
@@ -97,8 +107,9 @@ class MatchAnalytics(BaseModel):
     video_id: Optional[str] = None
     data_quality: DataQuality
     metrics: List[Metric] = Field(default_factory=list)
-    rallies: List[Dict[str, Any]] = Field(default_factory=list)  # empty until real CV
-    shots: List[Dict[str, Any]] = Field(default_factory=list)    # empty until real CV
+    rallies: List[Dict[str, Any]] = Field(default_factory=list)
+    shots: List[Dict[str, Any]] = Field(default_factory=list)
+    points: List[Dict[str, Any]] = Field(default_factory=list)
     important_moments: List[Dict[str, Any]] = Field(default_factory=list)
     analyzer: str = "lightweight"
     analyzer_version: str = "0.1.0"
@@ -107,11 +118,11 @@ class MatchAnalytics(BaseModel):
 
 class EvidenceItem(BaseModel):
     kind: Literal["player_metric", "match_analytic", "knowledge", "history"]
-    ref: str                  # id or citation
+    ref: str
     summary: str
     source: Optional[str] = None
     authority_level: Optional[int] = None
-    confidence: float = 0.0
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class CoachingReport(BaseModel):
@@ -129,7 +140,7 @@ class CoachingReport(BaseModel):
     training_plan: List[Dict[str, Any]] = Field(default_factory=list)
     metrics: List[Metric] = Field(default_factory=list)
     evidence: List[EvidenceItem] = Field(default_factory=list)
-    unavailable: List[str] = Field(default_factory=list)  # explicitly not detected
+    unavailable: List[str] = Field(default_factory=list)
     model: str = ""
     version: str = "0.1.0"
 
