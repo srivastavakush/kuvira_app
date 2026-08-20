@@ -2,100 +2,92 @@
 
 ## Audit result — 2026-08-21
 
-The repository already contains a substantial Phase 1–3 implementation. The work on `main` extends that implementation rather than replacing it. The architecture remains evidence-first and bounded; unavailable model/data artifacts are still fail-closed.
+`main` now contains the intended evidence-first, bounded agentic architecture plus the production boundaries required to run it safely. The remaining blockers are primarily real sports-model/data artifacts and deployment-time controls, not missing generic orchestration.
 
-## Phase 1 — Agentic orchestration
+## Implemented — agentic core
 
-Implemented:
+- Typed agent state, evidence planner, dynamic tool registry/execution, bounded steps and bounded replanning.
+- Evidence critic and deterministic grounding guard.
+- Report and chat share the same agentic runtime.
+- Coaching-state tools are first-class agent evidence.
 
-- Typed `CoachAgentState` with evidence, plan, tool calls, critique, missing evidence, replan count and bounded execution state.
-- Typed `AgentTool` + `AgentToolRegistry`.
-- Deterministic intent/goal understanding and evidence planning.
-- Dynamic tool execution with bounded steps and bounded replanning.
-- Evidence critic and deterministic final grounding guard.
-- Required tool surface now includes `get_player_profile`, `get_coaching_state`, `get_match_history`, `get_match_analytics`, `analyze_video`, `retrieve_coaching_knowledge`, `compare_matches`, `get_training_history`, `get_previous_recommendations`, `create_training_plan`, `assign_training`, and `get_training_outcomes`.
-- Chat and report generation both execute through `AgenticCoachWorkflow`; chat does not maintain a separate legacy LLM reasoning path.
-- Existing `CoachWorkflow` compatibility facade retained.
+## Implemented — longitudinal coaching
 
-## Phase 2 — CV architecture
+- Persistent goals, strengths, weaknesses, recurring weaknesses, improving areas and regressions.
+- Recommendation and active-training fingerprinting/deduplication.
+- Match-report → coaching-state transition with confidence gate.
+- Training completion/outcome recording.
+- Deterministic recommendation effectiveness when pre/post metrics and desired direction are supplied by the client.
+- Training adherence and recommendation-effectiveness state are persisted for future agent runs.
 
-Implemented infrastructure:
+## Implemented — CV evidence pipeline
 
-- `YOLO26Analyzer` behind the existing `VideoAnalyzer` contract.
-- Configurable detector weights and explicit fail-closed behavior when weights/dependencies are unavailable.
-- Player/ball detection and tracked player IDs.
-- Optional pose evidence.
-- Explicit calibrated court-geometry boundary using configured homography.
-- Ball trajectory and conservative ball-visibility segments.
-- Temporal shot-classifier adapter contract; no single-frame shot fabrication.
-- Confidence/provenance carried through analyzer outputs.
-- Sport analyzer registry introduced without duplicating the agent architecture.
+- Configurable YOLO26 detector/tracker boundary.
+- Player and ball observations with confidence/provenance.
+- Optional paddle observations when the configured detector provides a supported class.
+- Pose evidence boundary.
+- Calibrated court-geometry boundary.
+- Ball trajectory metrics.
+- Conservative ball-visibility segments.
+- Temporal shot-classifier adapter contract.
+- Deterministic candidate-rally reconstruction from validated shot events.
+- Explicit point-boundary segmentation only when the upstream temporal component provides `point_end`/`score` evidence.
+- Points, shots and rallies are persisted as separate analytics structures.
+- Domain metric schema now accepts the actual CV provenance sources and rejects out-of-range confidence.
 
-Not complete without real artifacts:
+## Implemented — storage / jobs / reliability
 
-- Validated YOLO26 player/ball/paddle weights and class mapping.
-- Validated pose model.
-- Validated court detector/calibration for supported camera views.
-- Trained temporal pickleball shot model.
-- Validated rally and point segmentation.
-- Evidence-backed pickleball movement/position/shot metrics.
+- Local storage for development.
+- S3-compatible object storage.
+- Google Cloud Storage backend with ADC-based credentials.
+- Upload-size enforcement across all storage backends.
+- Durable Mongo job records.
+- Atomic worker claiming and stale-lock recovery.
+- Retry/backoff and bounded attempts.
+- Match/video duplicate-job suppression.
+- Optional Idempotency-Key.
+- Local in-process rate limit fallback.
+- Mongo-backed distributed fixed-window rate limiting for multi-replica deployments.
+- SQS durable dispatch and worker consumption; Mongo remains the job-state source of truth.
+- Dedicated worker entry point.
 
-## Phase 3 — Longitudinal adaptive coaching
+## Implemented — evaluation infrastructure
 
-Implemented:
+- Strict report/evidence schema.
+- Grounding evaluation with unsupported-claim rate checks.
+- CV categorical-event precision/recall/F1 helper.
+- Golden-video manifest loader.
+- Evaluation CLI that fails when real media/labels are unavailable instead of fabricating a pass.
+- Unit tests for report schema, grounding, shot/rally/point segmentation.
+- Model-artifact requirements documented in `docs/AI_COACH_MODEL_ARTIFACTS.md`.
 
-- Persistent goals, active focus, strengths, weaknesses, recurring weaknesses, improving areas and regressions.
-- Previous recommendations, training assignments, outcomes and adherence persisted in player state.
-- Recommendation fingerprints and duplicate active-assignment protection.
-- Match-report → coaching-state transition with deterministic evidence gate.
-- Training completion/outcome recording and coaching events.
+## Still required — real sports model/data artifacts
 
-Closed loop:
+These cannot be honestly completed without validated artifacts and representative annotated videos:
 
-`match → evidence → diagnosis → state transition → recommendation → training assignment → outcome → updated state → next agent run`
+1. Production-quality YOLO26/player-ball-paddle weights and class mapping for the supported camera views.
+2. Validated pose model and quality thresholds.
+3. Validated court detector/calibration set for supported camera setups.
+4. Trained temporal pickleball shot classifier covering the supported stroke taxonomy.
+5. Validated rally and point segmentation against labeled video.
+6. Evidence-backed pickleball movement/position/error metrics computed from calibrated observations.
+7. Representative golden-video dataset with ground-truth labels.
+8. Measured acceptance thresholds from that dataset.
 
-## Phase 4 — Reliability / production guards
+The code is fail-closed when those artifacts are absent; it does not synthesize analytics to appear complete.
 
-Implemented:
+## Still required — deployment-time production controls
 
-- Retry with exponential backoff.
-- Atomic job claiming with worker locks, attempt counters and stale-lock recovery.
-- Idempotent match-level analytics upsert.
-- Duplicate active-job suppression.
-- Optional analysis idempotency keys.
-- Configurable chat and analysis rate limits.
-- Durable video object-storage abstraction with S3-compatible backend and local development fallback.
-- Dedicated worker entry point (`backend/ai_coach/worker.py`) for a separate inference process/container.
-- SQS queue adapter interface (`backend/ai_coach/queue.py`) is present; queue dispatch/consumer wiring remains deployment work.
-- Deterministic evaluation contracts expanded for CV, agent and coaching acceptance criteria.
-
-## Phase 5 — Evaluation
-
-Implemented:
-
-- Configurable acceptance thresholds.
-- Deterministic grounding regression checks.
-- Golden-label evaluation contracts for player detection, ball detection, tracking, pose, court calibration, shot classification, rally segmentation and point segmentation.
-- Agent/coaching evaluation contracts for tool selection, grounding, unsupported-claim rate and recommendation consistency.
-
-Remaining:
-
-- Actual golden-video dataset and labels.
-- Automated execution against representative videos.
-- Calibrated acceptance thresholds validated against the dataset.
-
-## Phase 6 — Frontend
-
-Existing Expo AI Coach screens and API surface remain intact. The backend report/chat contracts expose evidence, confidence/data quality, unavailable capabilities, coaching state, goals, training assignments and outcomes.
-
-The frontend is not considered complete until representative real-video analytics are available; no fake analytics are introduced to make the UI appear complete.
-
-## Phase 7 — Security / production hardening
-
-Existing authenticated user scoping is preserved for matches, videos, jobs, reports, chat and training. Further production work remains for distributed rate limiting, quotas, object-storage authorization/retention, observability, cost budgets and complete regression coverage.
+- Deploy the GCS/S3 backend and grant the worker service account/object-storage permissions.
+- Deploy the GPU inference worker with actual model weights.
+- Configure SQS (or equivalent durable queue) and visibility/dead-letter policies when using the SQS backend.
+- Configure distributed rate limiting (`AI_COACH_RATE_LIMIT_BACKEND=mongo`) and operational quotas.
+- Add production observability/alerts, cost budgets and retention lifecycle policies.
+- Run the evaluation CLI against real golden videos and store the results as CI artifacts.
+- Complete cross-user authorization regression tests and representative end-to-end tests in the deployed environment.
 
 ## Current completion status
 
-**NOT COMPLETE.**
+**NOT COMPLETE — intentionally.**
 
-The code now has the required agentic orchestration, longitudinal state model, durable-storage/worker boundaries and evaluation contracts. The system must not be marked complete until the validated CV/model artifacts, golden-video evaluation, durable queue deployment, distributed production controls and representative end-to-end regression tests are actually available and passing.
+The code-completable architecture is substantially implemented. The AI Coach must only be marked fully complete after the real CV artifacts are validated on representative videos, the durable worker/queue is deployed, production controls are configured, and the end-to-end evaluation passes.
