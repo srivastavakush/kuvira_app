@@ -6,31 +6,47 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, font, radius } from '@/src/theme';
 import { Loader } from '@/src/components/ui';
 import { api } from '@/src/api';
+import { useCapabilities } from '@/src/hooks/use-capabilities';
 
 export default function ClubWorkspace() {
   const { orgId } = useLocalSearchParams<{ orgId: string }>();
   const router = useRouter();
+  const { capabilities, loading: capsLoading, roleForOrg, canForOrg } = useCapabilities();
   const [org, setOrg] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
+  const currentOrgId = String(orgId);
+  const role = roleForOrg(currentOrgId);
+  const canView = canForOrg(currentOrgId, 'club.view');
+  const canAnalytics = canForOrg(currentOrgId, 'club.analytics.view');
+  const canBookings = canForOrg(currentOrgId, 'club.bookings.manage');
+  const canMembers = canForOrg(currentOrgId, 'club.members.manage');
+
   useEffect(() => {
+    if (capsLoading) return;
+    if (!canView) {
+      setErr('You do not have access to this club workspace.');
+      return;
+    }
     (async () => {
       try {
-        const [o, a] = await Promise.all([api.org(String(orgId)), api.orgAnalytics(String(orgId))]);
-        setOrg(o); setAnalytics(a);
-        setBookings(await api.orgBookings(String(orgId)).catch(() => []));
-        setMembers(await api.orgMembers(String(orgId)).catch(() => []));
+        const o = await api.org(currentOrgId);
+        setOrg(o);
+        if (canAnalytics) setAnalytics(await api.orgAnalytics(currentOrgId));
+        if (canBookings) setBookings(await api.orgBookings(currentOrgId).catch(() => []));
+        if (canMembers) setMembers(await api.orgMembers(currentOrgId).catch(() => []));
       } catch (e: any) { setErr(e.message || 'Access denied'); }
     })();
-  }, [orgId]);
+  }, [currentOrgId, capsLoading, canView, canAnalytics, canBookings, canMembers]);
 
+  if (capsLoading) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
   if (err) return (
     <SafeAreaView style={styles.wrap}><View style={styles.header}><Pressable onPress={() => router.back()}><Ionicons name="chevron-back" size={26} color={colors.onSurface} /></Pressable><Text style={styles.title}>Club</Text><View style={{ width: 26 }} /></View><Text style={{ color: colors.error, padding: spacing.lg }}>{err}</Text></SafeAreaView>
   );
-  if (!org || !analytics) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
+  if (!org) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
 
   return (
     <SafeAreaView style={styles.wrap} testID="club-workspace-screen">
@@ -41,17 +57,17 @@ export default function ClubWorkspace() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }} showsVerticalScrollIndicator={false}>
-        <View style={styles.workspaceBadge}><Ionicons name="business" size={14} color={colors.brandPrimary} /><Text style={styles.workspaceText}>CLUB WORKSPACE · {org.city}</Text></View>
+        <View style={styles.workspaceBadge}><Ionicons name="business" size={14} color={colors.brandPrimary} /><Text style={styles.workspaceText}>CLUB WORKSPACE · {org.city} · {role || 'MEMBER'}</Text></View>
 
-        <View style={styles.grid}>
+        {canAnalytics && analytics && <View style={styles.grid}>
           <Metric label="Revenue" value={`₹${analytics.revenue.toLocaleString('en-IN')}`} icon="cash" />
           <Metric label="Bookings" value={analytics.bookings_count} icon="calendar" />
           <Metric label="Games" value={analytics.games_count} icon="tennisball" />
           <Metric label="Members" value={analytics.members_count} icon="people" />
           <Metric label="Courts" value={analytics.facilities_count} icon="grid" />
-        </View>
+        </View>}
 
-        <Text style={styles.sectionH}>Recent Bookings</Text>
+        {canBookings && <><Text style={styles.sectionH}>Recent Bookings</Text>
         {bookings.length === 0 ? <Text style={styles.empty}>No bookings yet for this club.</Text> : bookings.slice(0, 8).map((b) => (
           <View key={b.id} style={styles.row} testID={`club-booking-${b.id}`}>
             <View style={{ flex: 1 }}>
@@ -60,9 +76,9 @@ export default function ClubWorkspace() {
             </View>
             <Text style={styles.rowPrice}>₹{b.price}</Text>
           </View>
-        ))}
+        ))}</>}
 
-        <Text style={styles.sectionH}>Team</Text>
+        {canMembers && <><Text style={styles.sectionH}>Team</Text>
         {members.map((m) => (
           <View key={m.id} style={styles.row} testID={`club-member-${m.user_id}`}>
             <View style={{ flex: 1 }}>
@@ -70,7 +86,7 @@ export default function ClubWorkspace() {
               <Text style={styles.rowMeta}>{m.role}</Text>
             </View>
           </View>
-        ))}
+        ))}</>}
       </ScrollView>
     </SafeAreaView>
   );
