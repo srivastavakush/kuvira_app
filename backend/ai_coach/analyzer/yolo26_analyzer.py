@@ -159,6 +159,9 @@ class YOLO26Analyzer(VideoAnalyzer):
             resolution=f"{width}x{height}" if width and height else None,
             player_tracking_confidence=round(player_conf, 4),
             ball_tracking_confidence=round(ball_conf, 4),
+            paddle_detection_confidence=round(paddle_conf, 4),
+            pose_confidence=round(pose_conf, 4),
+            court_geometry_confidence=round(court_conf, 4),
             shot_classification_confidence=round(shot_conf, 4),
             missing=missing,
             warnings=warnings,
@@ -190,6 +193,7 @@ class YOLO26Analyzer(VideoAnalyzer):
             "visibility_rallies": len(visibility_rallies),
             "candidate_rallies": len(candidate_rallies),
             "explicit_points": len(explicit_points),
+            "points": explicit_points,
             "paddle_observations": len(paddle_observations),
         }
         return AnalyzerResult(
