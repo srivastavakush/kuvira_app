@@ -1,10 +1,4 @@
-"""Bounded agentic coaching workflow.
-
-This is the orchestration layer described by the AI Coach design: plan evidence,
-execute typed tools, critique evidence, replan when evidence is missing, then
-synthesize a grounded answer. The existing analyzer/retriever/provider remain
-pluggable dependencies.
-"""
+"""Bounded agentic coaching workflow."""
 from __future__ import annotations
 import json
 import logging
@@ -70,7 +64,6 @@ class AgenticCoachWorkflow:
         return {"matches": rows}
 
     async def get_training_history(self, user_id: str, limit: int = 20, **_: Any) -> list[Dict[str, Any]]:
-        # The collection is intentionally optional for backwards compatibility.
         try:
             return await self.db.ai_coach_training.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(limit)
         except Exception:
@@ -80,8 +73,7 @@ class AgenticCoachWorkflow:
         try:
             return await self.db.ai_coach_recommendations.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(limit)
         except Exception:
-            reports = await self.db.ai_coach_reports.find({"user_id": user_id}, {"_id": 0, "recommended_drills": 1, "generated_at": 1}).sort("generated_at", -1).to_list(limit)
-            return reports
+            return await self.db.ai_coach_reports.find({"user_id": user_id}, {"_id": 0, "recommended_drills": 1, "generated_at": 1}).sort("generated_at", -1).to_list(limit)
 
     async def _execute_plan(self, state: CoachAgentState) -> None:
         for action in state.get("plan", []):
@@ -121,11 +113,11 @@ class AgenticCoachWorkflow:
 
     async def _synthesize(self, state: CoachAgentState) -> Dict[str, Any]:
         evidence = state.get("evidence", [])
-        analytics = state.get("match_analytics", {})
         prompt = {
             "goal": state.get("goal"), "intent": state.get("intent"), "player": state.get("player_context", {}),
-            "analytics": analytics, "evidence": evidence, "knowledge": state.get("knowledge", []),
+            "analytics": state.get("match_analytics", {}), "evidence": evidence, "knowledge": state.get("knowledge", []),
             "previous_recommendations": [e.get("data") for e in evidence if e.get("kind") == "previous_recommendations"],
+            "critic": state.get("critique", {}),
             "instructions": "Return JSON. Never invent statistics or tactical observations. Separate measured facts from inference. If evidence is insufficient, put the limitation in unavailable and do not make player-specific tactical claims.",
         }
         schema = {"title": "AgenticCoachingReport", "type": "object", "properties": {
@@ -138,11 +130,25 @@ class AgenticCoachWorkflow:
             system="You are Kuvira's evidence-first agentic sports coach. Use only supplied evidence. Do not fabricate.",
             user=json.dumps(prompt, default=str), schema=schema)
 
+    @staticmethod
+    def _apply_critic_guard(report: Dict[str, Any], critique: Dict[str, Any]) -> Dict[str, Any]:
+        """Deterministic final safety gate; never trust model compliance alone."""
+        if critique.get("approved"):
+            return report
+        unavailable = list(report.get("unavailable") or [])
+        for key in ("strengths", "weaknesses", "tactical_observations"):
+            if report.get(key):
+                report[key] = []
+                tag = f"{key}_requires_more_evidence"
+                if tag not in unavailable:
+                    unavailable.append(tag)
+        report["unavailable"] = unavailable
+        return report
+
     async def run(self, *, user_id: str, goal: str = "Generate a grounded coaching report", match_id: Optional[str] = None, video_id: Optional[str] = None, sport: str = "pickleball") -> CoachAgentState:
         state: CoachAgentState = {"user_id": user_id, "goal": goal, "match_id": match_id, "video_id": video_id, "sport": sport,
                                   "evidence": [], "tool_calls": [], "step_count": 0, "replan_count": 0, "max_steps": self.planner.max_steps, "max_replans": self.planner.max_replans, "done": False}
-        plan = self.planner.plan(goal, {"video_id": video_id})
-        state.update(plan)
+        state.update(self.planner.plan(goal, {"match_id": match_id, "video_id": video_id}))
         while not state.get("done"):
             await self._execute_plan(state)
             critique = self.critic.evaluate(state.get("required_evidence", []), state.get("evidence", []))
@@ -152,14 +158,21 @@ class AgenticCoachWorkflow:
             if action == "replan":
                 state["replan_count"] = state.get("replan_count", 0) + 1
                 missing = set(critique.get("missing_evidence", []))
-                # Replan only missing capabilities; never loop indefinitely.
-                state["plan"] = [p for p in state.get("plan", []) if p.get("tool") in missing]
+                mapping = {
+                    "player_profile": "get_player_profile", "match_analytics": "get_match_analytics",
+                    "video_analysis": "analyze_video", "match_history": "get_match_history",
+                    "match_comparison": "compare_matches", "training_history": "get_training_history",
+                    "previous_recommendations": "get_previous_recommendations", "coaching_knowledge": "retrieve_coaching_knowledge",
+                }
+                state["plan"] = [p for p in state.get("plan", []) if p.get("tool") in {mapping.get(x, x) for x in missing}]
                 if not state["plan"]:
+                    state["next_action"] = "safe_finalize"
                     break
                 continue
             state["done"] = True
         try:
-            state["final_report"] = await self._synthesize(state)
+            report = await self._synthesize(state)
+            state["final_report"] = self._apply_critic_guard(report, state.get("critique", {}))
         except Exception as exc:
             log.exception("agent synthesis failed")
             state["final_report"] = {"match_summary": "Coach could not reach the reasoning model.", "data_quality_summary": "The evidence pipeline completed, but reasoning is unavailable.", "unavailable": ["reasoning_layer"], "error": str(exc)[:200]}
