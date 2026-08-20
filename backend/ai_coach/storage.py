@@ -8,6 +8,28 @@ from pathlib import Path
 from typing import BinaryIO
 
 
+class _LimitedReader:
+    def __init__(self, source: BinaryIO, max_bytes: int | None):
+        self.source = source
+        self.max_bytes = max_bytes
+        self.total = 0
+
+    def read(self, size: int = -1):
+        chunk = self.source.read(size)
+        if not chunk:
+            return chunk
+        self.total += len(chunk)
+        if self.max_bytes is not None and self.total > self.max_bytes:
+            raise ValueError("video exceeds configured size limit")
+        return chunk
+
+    def seek(self, *args, **kwargs):
+        return self.source.seek(*args, **kwargs)
+
+    def tell(self):
+        return self.source.tell()
+
+
 class ObjectStorage:
     def __init__(self) -> None:
         self.backend = os.environ.get("AI_COACH_STORAGE_BACKEND", "local").lower()
@@ -35,34 +57,32 @@ class ObjectStorage:
 
     def put(self, fileobj: BinaryIO, video_id: str, extension: str = ".mp4", max_bytes: int | None = None) -> dict:
         key = self.key(video_id, extension)
-        total = 0
-        if self.backend == "s3":
-            assert self._client is not None
-            self._client.upload_fileobj(fileobj, self.bucket, key, ExtraArgs={"ContentType": "video/mp4"})
-            return {"backend": "s3", "bucket": self.bucket, "object_key": key}
-        if self.backend == "gcs":
-            blob = self._bucket.blob(key)
-            blob.chunk_size = 8 * 1024 * 1024
-            blob.upload_from_file(fileobj, rewind=False, content_type="video/mp4")
-            return {"backend": "gcs", "bucket": self.bucket, "object_key": key}
-        upload_dir = Path(os.environ.get("AI_COACH_UPLOAD_DIR", "/app/backend/uploads/videos"))
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        path = upload_dir / f"{video_id}{extension}"
+        reader = _LimitedReader(fileobj, max_bytes)
         try:
+            if self.backend == "s3":
+                assert self._client is not None
+                self._client.upload_fileobj(reader, self.bucket, key, ExtraArgs={"ContentType": "video/mp4"})
+                return {"backend": "s3", "bucket": self.bucket, "object_key": key, "size_bytes": reader.total}
+            if self.backend == "gcs":
+                blob = self._bucket.blob(key)
+                blob.chunk_size = 8 * 1024 * 1024
+                blob.upload_from_file(reader, rewind=False, content_type="video/mp4")
+                return {"backend": "gcs", "bucket": self.bucket, "object_key": key, "size_bytes": reader.total}
+            upload_dir = Path(os.environ.get("AI_COACH_UPLOAD_DIR", "/app/backend/uploads/videos"))
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            path = upload_dir / f"{video_id}{extension}"
             with path.open("wb") as out:
                 while True:
-                    chunk = fileobj.read(1024 * 1024)
+                    chunk = reader.read(1024 * 1024)
                     if not chunk:
                         break
-                    total += len(chunk)
-                    if max_bytes and total > max_bytes:
-                        raise ValueError("video exceeds configured size limit")
                     out.write(chunk)
+            return {"backend": "local", "path": str(path), "size_bytes": reader.total}
         except Exception:
-            try: path.unlink()
-            except FileNotFoundError: pass
+            if self.backend == "local":
+                try: path.unlink()
+                except (FileNotFoundError, UnboundLocalError): pass
             raise
-        return {"backend": "local", "path": str(path), "size_bytes": total}
 
     def download_to(self, storage: dict, destination: str) -> str:
         backend = storage.get("backend")
@@ -71,8 +91,7 @@ class ObjectStorage:
             self._client.download_file(storage["bucket"], storage["object_key"], destination)
             return destination
         if backend == "gcs":
-            blob = self._bucket.blob(storage["object_key"])
-            blob.download_to_filename(destination)
+            self._bucket.blob(storage["object_key"]).download_to_filename(destination)
             return destination
         path = storage.get("path") or storage.get("storage_path")
         if not path or not os.path.exists(path):
