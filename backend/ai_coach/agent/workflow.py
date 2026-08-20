@@ -25,17 +25,25 @@ class AgenticCoachWorkflow:
         self._register_tools()
 
     def _register_tools(self) -> None:
-        self.tools.register(AgentTool("get_player_profile", "Load the authenticated player's coaching profile.", self.get_player_profile))
+        self.tools.register(AgentTool("get_player_profile", "Load the authenticated player's profile.", self.get_player_profile))
+        self.tools.register(AgentTool("get_coaching_state", "Load persistent coaching state.", self.get_coaching_state))
         self.tools.register(AgentTool("get_match_history", "Load recent matches for longitudinal reasoning.", self.get_match_history))
         self.tools.register(AgentTool("get_match_analytics", "Load measured analytics for a match.", self.get_match_analytics))
         self.tools.register(AgentTool("analyze_video", "Use completed video analytics as evidence; never fabricate unavailable metrics.", self.analyze_video))
         self.tools.register(AgentTool("retrieve_coaching_knowledge", "Retrieve authoritative coaching knowledge for the goal.", self.retrieve_coaching_knowledge))
         self.tools.register(AgentTool("compare_matches", "Compare measured metrics across selected matches.", self.compare_matches))
-        self.tools.register(AgentTool("get_training_history", "Load recorded AI Coach training/recommendation outcomes.", self.get_training_history))
+        self.tools.register(AgentTool("get_training_history", "Load recorded training assignments and outcomes.", self.get_training_history))
         self.tools.register(AgentTool("get_previous_recommendations", "Load previous recommendations to avoid repetition.", self.get_previous_recommendations))
+        self.tools.register(AgentTool("create_training_plan", "Create deduplicated training assignments from grounded recommendations.", self.create_training_plan, read_only=False))
+        self.tools.register(AgentTool("assign_training", "Assign a single deduplicated training item.", self.assign_training, read_only=False))
+        self.tools.register(AgentTool("get_training_outcomes", "Load completed training outcomes for longitudinal reasoning.", self.get_training_outcomes))
 
     async def get_player_profile(self, user_id: str, **_: Any) -> Dict[str, Any]:
         return await self.db.users.find_one({"id": user_id}, {"_id": 0}) or {}
+
+    async def get_coaching_state(self, user_id: str, **_: Any) -> Dict[str, Any]:
+        from ..coaching_state import CoachingStateService
+        return await CoachingStateService(self.db).get_state(user_id)
 
     async def get_match_history(self, user_id: str, limit: int = 10, **_: Any) -> list[Dict[str, Any]]:
         return await self.db.ai_coach_matches.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(limit)
@@ -43,8 +51,10 @@ class AgenticCoachWorkflow:
     async def get_match_analytics(self, match_id: str, **_: Any) -> Dict[str, Any]:
         return await self.db.ai_coach_analytics.find_one({"match_id": match_id}, {"_id": 0}) or {}
 
-    async def analyze_video(self, match_id: str, **_: Any) -> Dict[str, Any]:
+    async def analyze_video(self, match_id: str, video_id: Optional[str] = None, **_: Any) -> Dict[str, Any]:
         analytics = await self.get_match_analytics(match_id)
+        if video_id and analytics.get("video_id") not in {None, video_id}:
+            return {"analytics": {}, "available": False, "confidence": 0.0, "reason": "video_does_not_match_analytics"}
         return {"analytics": analytics, "available": bool(analytics), "confidence": float((analytics.get("data_quality") or {}).get("overall_confidence", 0.0))}
 
     async def retrieve_coaching_knowledge(self, query: str, sport: str = "pickleball", **_: Any) -> list[Dict[str, Any]]:
@@ -69,56 +79,96 @@ class AgenticCoachWorkflow:
         except Exception:
             return []
 
+    async def get_training_outcomes(self, user_id: str, limit: int = 20, **_: Any) -> list[Dict[str, Any]]:
+        rows = await self.get_training_history(user_id, limit=limit)
+        return [row for row in rows if row.get("outcome") is not None or row.get("status") in {"completed", "skipped"}]
+
     async def get_previous_recommendations(self, user_id: str, limit: int = 10, **_: Any) -> list[Dict[str, Any]]:
         try:
             return await self.db.ai_coach_recommendations.find({"user_id": user_id}, {"_id": 0}).sort("created_at", -1).to_list(limit)
         except Exception:
-            return await self.db.ai_coach_reports.find({"user_id": user_id}, {"_id": 0, "recommended_drills": 1, "generated_at": 1}).sort("generated_at", -1).to_list(limit)
+            return []
+
+    async def create_training_plan(self, user_id: str, recommendations: list[Dict[str, Any]] | None = None, match_id: Optional[str] = None, **_: Any) -> Dict[str, Any]:
+        from ..coaching_state import CoachingStateService
+        service = CoachingStateService(self.db)
+        assignments = []
+        for item in (recommendations or [])[:5]:
+            if not isinstance(item, dict):
+                continue
+            rec = await service.record_recommendation(user_id, match_id, item)
+            assignments.append(await service.assign_training(user_id, rec, match_id))
+        return {"assignments": assignments}
+
+    async def assign_training(self, user_id: str, recommendation: Dict[str, Any] | None = None, match_id: Optional[str] = None, **_: Any) -> Dict[str, Any]:
+        return await self.create_training_plan(user_id, [recommendation] if recommendation else [], match_id=match_id)
+
+    def _required_tool_args(self, state: CoachAgentState, name: str) -> Dict[str, Any]:
+        args: Dict[str, Any] = {
+            "user_id": state["user_id"], "match_id": state.get("match_id"), "video_id": state.get("video_id"),
+            "sport": state.get("sport", "pickleball"), "query": state.get("goal", ""),
+        }
+        return {k: v for k, v in args.items() if v is not None}
+
+    def _record_evidence(self, state: CoachAgentState, name: str, result: Any) -> None:
+        available = bool(result)
+        confidence = 1.0 if available else 0.0
+        kind = name
+        if name in {"get_match_analytics", "analyze_video"}:
+            analytics = result.get("analytics", result) if isinstance(result, dict) else {}
+            dq = analytics.get("data_quality") or {}
+            confidence = float(result.get("confidence", dq.get("overall_confidence", 0.0))) if isinstance(result, dict) else 0.0
+            available = bool(result.get("available", True)) and bool(analytics)
+            kind = "video_analysis" if name == "analyze_video" else "match_analytics"
+        elif name == "get_coaching_state":
+            kind = "coaching_state"
+        elif name == "compare_matches":
+            kind = "match_comparison"; available = bool(result.get("matches"))
+        elif name == "get_training_history":
+            kind = "training_history"
+        elif name == "get_training_outcomes":
+            kind = "training_outcomes"
+        elif name == "get_previous_recommendations":
+            kind = "previous_recommendations"
+        elif name == "retrieve_coaching_knowledge":
+            kind = "coaching_knowledge"
+            confidence = min([float(x.get("confidence", 0.0)) for x in result], default=0.0)
+        elif name == "get_match_history":
+            kind = "match_history"
+        state.setdefault("evidence", []).append({"kind": kind, "source": name, "confidence": confidence, "data": result, "available": available})
 
     async def _execute_plan(self, state: CoachAgentState) -> None:
         for action in state.get("plan", []):
             if state.get("step_count", 0) >= state.get("max_steps", 8):
                 break
             name = action["tool"]
-            args: Dict[str, Any] = {"user_id": state["user_id"], "match_id": state.get("match_id"), "sport": state.get("sport", "pickleball"), "query": state.get("goal", "")}
+            args = self._required_tool_args(state, name)
             try:
                 result = await self.tools.execute(name, **args)
                 state.setdefault("tool_calls", []).append({"tool": name, "args": args, "result": result})
                 state["step_count"] = state.get("step_count", 0) + 1
-                if name == "get_player_profile":
-                    state["player_context"] = result
-                    state.setdefault("evidence", []).append({"kind": "player_profile", "source": "users", "confidence": 1.0, "data": result, "available": bool(result)})
-                elif name == "get_match_analytics":
-                    state["match_analytics"] = result
-                    dq = result.get("data_quality") or {}
-                    state.setdefault("evidence", []).append({"kind": "match_analytics", "source": result.get("analyzer", "analyzer"), "confidence": float(dq.get("overall_confidence", 0.0)), "data": result, "available": bool(result)})
-                elif name == "analyze_video":
-                    dq = (result.get("analytics") or {}).get("data_quality") or {}
-                    state.setdefault("evidence", []).append({"kind": "video_analysis", "source": "video_analyzer", "confidence": float(dq.get("overall_confidence", 0.0)), "data": result, "available": bool(result.get("available"))})
-                elif name == "get_match_history":
-                    state.setdefault("evidence", []).append({"kind": "match_history", "source": "ai_coach_matches", "confidence": 1.0, "data": result, "available": bool(result)})
-                elif name == "compare_matches":
-                    state.setdefault("evidence", []).append({"kind": "match_comparison", "source": "ai_coach_analytics", "confidence": 1.0 if result.get("matches") else 0.0, "data": result, "available": bool(result.get("matches"))})
-                elif name == "get_training_history":
-                    state.setdefault("evidence", []).append({"kind": "training_history", "source": "ai_coach_training", "confidence": 1.0 if result else 0.0, "data": result, "available": bool(result)})
-                elif name == "get_previous_recommendations":
-                    state.setdefault("evidence", []).append({"kind": "previous_recommendations", "source": "ai_coach_recommendations", "confidence": 1.0 if result else 0.0, "data": result, "available": bool(result)})
-                elif name == "retrieve_coaching_knowledge":
-                    state["knowledge"] = result
-                    state.setdefault("evidence", []).append({"kind": "coaching_knowledge", "source": "knowledge_retriever", "confidence": min([float(x.get("confidence", 0.0)) for x in result], default=0.0), "data": result, "available": bool(result)})
+                if name == "get_player_profile": state["player_context"] = result
+                elif name == "get_coaching_state": state["coaching_state"] = result
+                elif name == "get_match_analytics": state["match_analytics"] = result
+                elif name == "retrieve_coaching_knowledge": state["knowledge"] = result
+                elif name == "get_training_history": state["training_history"] = result
+                elif name == "get_previous_recommendations": state["previous_recommendations"] = result
+                self._record_evidence(state, name, result)
             except Exception as exc:
                 log.exception("agent tool failed: %s", name)
                 state.setdefault("tool_calls", []).append({"tool": name, "args": args, "error": str(exc)})
                 state["step_count"] = state.get("step_count", 0) + 1
+                state.setdefault("evidence", []).append({"kind": name, "source": name, "confidence": 0.0, "data": {}, "available": False})
 
     async def _synthesize(self, state: CoachAgentState) -> Dict[str, Any]:
         evidence = state.get("evidence", [])
         prompt = {
             "goal": state.get("goal"), "intent": state.get("intent"), "player": state.get("player_context", {}),
-            "analytics": state.get("match_analytics", {}), "evidence": evidence, "knowledge": state.get("knowledge", []),
-            "previous_recommendations": [e.get("data") for e in evidence if e.get("kind") == "previous_recommendations"],
+            "coaching_state": state.get("coaching_state", {}), "analytics": state.get("match_analytics", {}),
+            "evidence": evidence, "knowledge": state.get("knowledge", []),
+            "training_history": state.get("training_history", []), "previous_recommendations": state.get("previous_recommendations", []),
             "critic": state.get("critique", {}),
-            "instructions": "Return JSON. Never invent statistics or tactical observations. Separate measured facts from inference. If evidence is insufficient, put the limitation in unavailable and do not make player-specific tactical claims.",
+            "instructions": "Return JSON. Never invent statistics, positioning, shot/rally outcomes, tactical observations or confidence. Distinguish FACT, EVIDENCE, INFERENCE and ACTION. Player-specific claims must cite supplied evidence. If evidence is insufficient, put the limitation in unavailable and do not make the claim.",
         }
         schema = {"title": "AgenticCoachingReport", "type": "object", "properties": {
             "match_summary": {"type": "string"}, "data_quality_summary": {"type": "string"}, "key_takeaway": {"type": "string"},
@@ -132,7 +182,6 @@ class AgenticCoachWorkflow:
 
     @staticmethod
     def _apply_critic_guard(report: Dict[str, Any], critique: Dict[str, Any]) -> Dict[str, Any]:
-        """Deterministic final safety gate; never trust model compliance alone."""
         if critique.get("approved"):
             return report
         unavailable = list(report.get("unavailable") or [])
@@ -153,18 +202,20 @@ class AgenticCoachWorkflow:
             await self._execute_plan(state)
             critique = self.critic.evaluate(state.get("required_evidence", []), state.get("evidence", []))
             state["critique"] = critique
+            state["missing_evidence"] = critique.get("missing_evidence", [])
             action = self.critic.next_action(critique, state.get("replan_count", 0), state.get("max_replans", 2))
             state["next_action"] = action
             if action == "replan":
                 state["replan_count"] = state.get("replan_count", 0) + 1
                 missing = set(critique.get("missing_evidence", []))
                 mapping = {
-                    "player_profile": "get_player_profile", "match_analytics": "get_match_analytics",
-                    "video_analysis": "analyze_video", "match_history": "get_match_history",
-                    "match_comparison": "compare_matches", "training_history": "get_training_history",
+                    "player_profile": "get_player_profile", "coaching_state": "get_coaching_state", "match_analytics": "get_match_analytics",
+                    "video_analysis": "analyze_video", "match_history": "get_match_history", "match_comparison": "compare_matches",
+                    "training_history": "get_training_history", "training_outcomes": "get_training_outcomes",
                     "previous_recommendations": "get_previous_recommendations", "coaching_knowledge": "retrieve_coaching_knowledge",
                 }
-                state["plan"] = [p for p in state.get("plan", []) if p.get("tool") in {mapping.get(x, x) for x in missing}]
+                missing_tools = {mapping.get(x, x) for x in missing}
+                state["plan"] = [p for p in state.get("plan", []) if p.get("tool") in missing_tools]
                 if not state["plan"]:
                     state["next_action"] = "safe_finalize"
                     break
