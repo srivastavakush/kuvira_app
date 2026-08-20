@@ -6,32 +6,29 @@ Implement the agentic coaching architecture defined by the AI Coach design rathe
 
 ## Phase 1 — Agentic orchestration
 
-Implemented on branch `feat/complete-agentic-ai-coach`:
+Implemented:
 
 - Typed `CoachAgentState` with evidence, plan, tool calls, critique, replan count and bounded execution state.
 - `AgentTool` + `AgentToolRegistry` abstraction.
 - Evidence planner with intent routing for match analysis, training, progress and comparison.
-- Tool implementations for player profile, match history, match analytics, video evidence, coaching knowledge, match comparison, training history and previous recommendations.
-- `EvidenceCritic` with confidence threshold and missing-evidence detection.
+- Player, history, analytics, video, knowledge, comparison, training-history and recommendation tools.
+- Evidence critic with confidence threshold and missing-evidence detection.
 - Bounded replanning and deterministic final grounding guard.
-- Existing `CoachWorkflow` API retained as a compatibility facade.
+- Existing `CoachWorkflow` compatibility facade retained.
 
 ## Phase 2 — CV architecture
 
 Implemented infrastructure:
 
-- `YOLO26Analyzer` adapter behind the existing `VideoAnalyzer` contract.
-- `AI_COACH_ANALYZER=lightweight|yolo26` analyzer registry.
-- `AI_COACH_YOLO_WEIGHTS` configuration.
-- Runtime analyzer selection and persisted analyzer/version/diagnostics.
-- Explicit player/ball tracking evidence.
-- Optional YOLO pose evidence through `AI_COACH_POSE_WEIGHTS`.
-- Explicit calibrated court geometry through `AI_COACH_COURT_CALIBRATION` or a JSON calibration model path.
-- Ball trajectory metrics derived from tracked observations.
-- Observable ball-visibility segments reconstructed with conservative provenance.
-- Temporal shot classification through an explicit adapter contract: `AI_COACH_SHOT_ADAPTER=module.path:ClassOrObject`.
+- `YOLO26Analyzer` adapter and runtime analyzer registry.
+- Player/ball tracking evidence.
+- Optional pose model evidence.
+- Explicit calibrated court geometry boundary.
+- Ball trajectory metrics and conservative ball-visibility segments.
+- Temporal shot adapter contract.
+- Explicit confidence/provenance for every CV layer.
 
-Important: a generic detector is **not** treated as a shot classifier. Visibility segments are **not** treated as scored rallies. This prevents fabricated sports analytics.
+Important: generic detection is never treated as shot classification; visibility segments are never treated as scored rallies.
 
 ## Phase 3 — Longitudinal adaptive coaching
 
@@ -39,52 +36,64 @@ Implemented:
 
 - Persistent player coaching state.
 - Goals and goal status transitions.
-- Recommendation persistence with fingerprints.
-- Training assignment persistence with duplicate protection.
+- Recommendation persistence and duplicate fingerprints.
+- Training assignment persistence and duplicate protection.
 - Training completion/outcome recording.
 - Training adherence calculations.
 - Match-report → coaching-state transition service.
-- Confidence/evidence gate preventing weak reports from mutating recurring strengths/weaknesses or assigning adaptive drills.
-- Regression tracking when a previously observed weakness reappears.
+- Confidence/evidence gate preventing weak reports from mutating player state or creating adaptive drills.
+- Regression tracking.
 - Unified agentic chat using the same planner/tool/critic/replan runtime.
 - Frontend API surface for coaching state, goals, training and outcomes.
 
-Closed-loop path:
+Closed loop:
 
 `match → evidence → diagnosis → state transition → recommendation → training assignment → outcome → updated state → next agent run`
 
+## Phase 4 — Reliability / production guards
+
+Implemented in application code:
+
+- Analyzer retry with exponential backoff.
+- Idempotent match-level analytics upsert.
+- Duplicate active-job suppression for the same match/video.
+- Optional `Idempotency-Key` support for analysis requests.
+- Configurable chat and analysis rate limits.
+- Job attempt/error diagnostics.
+- Deterministic report-evaluation harness (`backend/ai_coach/evaluation.py`) for grounding-contract regression checks.
+
+These are process-local guards. For horizontally scaled production, replace the in-memory limiter with Redis/Cloud Tasks semantics.
+
 ## Remaining real sports-intelligence deliverables
 
-The repository now has the production contracts, but the following model/data artifacts must still be validated:
+These cannot be honestly completed without the actual validated model/data artifacts:
 
-1. Actual YOLO26 weights/class mapping for player, ball and paddle.
-2. Validated pose model and keypoint quality thresholds.
-3. Court-keypoint detector or calibrated court configurations for supported camera views.
-4. Trained temporal pickleball shot classifier implementing the shot-adapter contract.
-5. Point/rally segmentation with validated point-boundary evidence. Ball-visibility segments alone are insufficient.
-6. Sport-specific metrics computed only from calibrated evidence.
-7. Golden-video evaluation set and acceptance thresholds.
+1. YOLO26 weights/class mapping for player, ball and paddle.
+2. Validated pose model and keypoint thresholds.
+3. Court-keypoint detector or calibrated configurations for supported camera views.
+4. Trained temporal pickleball shot classifier.
+5. Validated point/rally segmentation.
+6. Sport-specific metrics from calibrated evidence.
+7. Golden-video evaluation dataset and acceptance thresholds.
 
-## Productionization still required
+## Remaining production infrastructure
 
 - Object storage for videos instead of container-local persistence.
-- Durable GPU inference workers and durable queue semantics instead of fire-and-forget tasks.
-- Retry/idempotency policy.
-- Rate limiting and quotas.
+- Durable GPU inference worker/queue rather than process-local fire-and-forget execution.
+- Distributed rate limiting/quota enforcement.
 - Model/analyzer observability.
-- Cost and latency budgets.
-- Video cleanup lifecycle.
-- End-to-end regression suite over representative videos.
+- Cost/latency budgets.
+- Automated video cleanup lifecycle.
+- Full end-to-end regression suite over representative videos.
 - Multi-sport analyzer registry and sport-specific model implementations.
 
 ## Completion rule
 
-The AI Coach should only be called **fully implemented** when all of these are true:
+The AI Coach is **not fully complete** until:
 
-- planner/tool/critic/replan flow is active for report and chat
-- real CV produces validated player/ball/court/pose/shot/rally evidence
-- tactical claims are gated by calibrated confidence
-- training recommendations persist and feed back into future planning
-- longitudinal state connects matches → diagnosis → drills → outcomes → next diagnosis
-- production video storage and inference jobs are durable
-- end-to-end evaluation passes on representative video data
+- report and chat use planner/tool/critic/replan
+- validated CV provides player/ball/court/pose/shot/rally evidence
+- tactical claims use calibrated confidence
+- matches update player state and training outcomes feed future planning
+- video storage and inference jobs are durable
+- representative-video evaluation passes
