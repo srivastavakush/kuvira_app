@@ -123,3 +123,11 @@ def require_org_permission(permission: str):
         if permission not in allowed: raise KuviraError(403, "PERMISSION_DENIED", f"Missing permission: {permission}")
         return user
     return _dep
+
+# Mounted here intentionally: server.py already imports org_admin, which is the
+# platform-admin router mounted by the application. The catalog module attaches
+# its router to that existing router without requiring a server.py rewrite.
+try:
+    import catalog_seed as _catalog_seed  # noqa: F401,E402
+except Exception as exc:
+    log.warning("catalog seed router unavailable: %s", exc)
