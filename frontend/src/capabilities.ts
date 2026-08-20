@@ -34,7 +34,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   CLUB_OWNER: [
     'club.view', 'club.manage', 'club.courts.manage', 'club.bookings.manage',
     'club.games.manage', 'club.events.manage', 'club.members.manage',
-    'club.staff.manage', 'club.analytics.view',
+    'club.staff.manage', 'club.ownership.transfer', 'club.analytics.view',
   ],
   CLUB_MANAGER: [
     'club.view', 'club.manage', 'club.courts.manage', 'club.bookings.manage',
