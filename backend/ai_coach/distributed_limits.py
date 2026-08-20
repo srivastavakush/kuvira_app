@@ -1,15 +1,9 @@
-"""Mongo-backed fixed-window rate limiter for multi-replica deployments.
-
-This avoids a new runtime dependency while remaining shared across application
-instances because counters live in MongoDB. It is intentionally conservative:
-a denied write is treated as allowed only when the database is unavailable to
-avoid turning an outage into a total application outage; production can choose
-to fail closed with AI_COACH_RATE_LIMIT_FAIL_CLOSED=true.
-"""
+"""Mongo-backed fixed-window rate limiter for multi-replica deployments."""
 from __future__ import annotations
 import os
 import time
 from typing import Any
+from pymongo import ReturnDocument
 
 
 class MongoRateLimiter:
@@ -37,8 +31,8 @@ class MongoRateLimiter:
                 {"key": document_key, "window": window},
                 {"$inc": {"count": 1}, "$setOnInsert": {"expires_at": now + self.window_seconds + 5}},
                 upsert=True,
-                return_document=True,
+                return_document=ReturnDocument.AFTER,
             )
             return int(doc.get("count", self.limit + 1)) <= self.limit
         except Exception:
-            return os.environ.get("AI_COACH_RATE_LIMIT_FAIL_CLOSED", "false").lower() == "false"
+            return os.environ.get("AI_COACH_RATE_LIMIT_FAIL_CLOSED", "false").lower() != "true"
