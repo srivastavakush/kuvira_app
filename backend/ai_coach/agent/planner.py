@@ -1,9 +1,4 @@
-"""Deterministic evidence planner with an LLM-ready contract.
-
-The planner intentionally does not invent analytics. It maps a coaching goal
-to the minimum evidence/tool set and records missing evidence for replanning.
-A future model planner can replace `plan()` without changing the state/tool API.
-"""
+"""Deterministic evidence planner with an LLM-ready contract."""
 from __future__ import annotations
 from typing import Any, Dict, List
 
@@ -32,15 +27,21 @@ class AgentPlanner:
         required: List[str] = ["player_profile"]
         actions: List[Dict[str, Any]] = [{"tool": "get_player_profile", "reason": "establish player context"}]
 
-        if intent == "match_analysis":
-            required += ["match_analytics", "coaching_knowledge"]
-            actions += [
-                {"tool": "get_match_analytics", "reason": "ground diagnosis in observed match evidence"},
-                {"tool": "retrieve_coaching_knowledge", "reason": "ground recommendations in methodology"},
-            ]
+        # A match/video context is an explicit evidence requirement even when
+        # the user's wording is generic (e.g. report generation).
+        if context.get("match_id") or context.get("video_id"):
+            required.append("match_analytics")
+            actions.append({"tool": "get_match_analytics", "reason": "ground the answer in measured match evidence"})
             if context.get("video_id"):
                 required.append("video_analysis")
-                actions.insert(1, {"tool": "analyze_video", "reason": "obtain video-derived evidence"})
+                actions.insert(-1, {"tool": "analyze_video", "reason": "include the completed video-analysis evidence"})
+
+        if intent == "match_analysis":
+            if "match_analytics" not in required:
+                required.append("match_analytics")
+                actions.append({"tool": "get_match_analytics", "reason": "ground diagnosis in observed match evidence"})
+            required.append("coaching_knowledge")
+            actions.append({"tool": "retrieve_coaching_knowledge", "reason": "ground recommendations in methodology"})
         elif intent == "comparison":
             required += ["match_history", "match_comparison"]
             actions += [
@@ -60,13 +61,9 @@ class AgentPlanner:
                 {"tool": "get_previous_recommendations", "reason": "avoid repeating stale advice"},
             ]
         else:
-            required.append("coaching_knowledge")
-            actions.append({"tool": "retrieve_coaching_knowledge", "reason": "provide grounded coaching guidance"})
+            if "coaching_knowledge" not in required:
+                required.append("coaching_knowledge")
+                actions.append({"tool": "retrieve_coaching_knowledge", "reason": "provide grounded coaching guidance"})
 
-        return {
-            "intent": intent,
-            "required_evidence": required,
-            "plan": actions,
-            "max_steps": self.max_steps,
-            "max_replans": self.max_replans,
-        }
+        return {"intent": intent, "required_evidence": required, "plan": actions,
+                "max_steps": self.max_steps, "max_replans": self.max_replans}
