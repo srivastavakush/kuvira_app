@@ -30,7 +30,7 @@ def test_otp_verify_new_user(api_client, base_url):
     data = r.json()
     assert "token" in data and "user" in data
     assert data["is_new"] is True
-    assert data["user"]["mobile"] == mobile
+    assert data["user"]["mobile"] == "+91" + mobile
     assert data["user"]["onboarded"] is False
 
 

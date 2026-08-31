@@ -51,7 +51,6 @@ export default function Profile() {
     );
   }
 
-  const winRate = insights?.stats?.win_rate || 0;
   const isAdmin = Boolean(caps?.is_platform_admin);
 
   return (
@@ -59,16 +58,22 @@ export default function Profile() {
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Image source={{ uri: user.avatar || 'https://i.pravatar.cc/300' }} style={styles.avatar} />
+          {user.avatar ? (
+            <Image source={{ uri: user.avatar }} style={styles.avatar} testID="profile-avatar-image" />
+          ) : (
+            <View style={[styles.avatar, styles.avatarInitials]} testID="profile-avatar-initials">
+              <Text style={styles.avatarInitialsText}>{initials(user.name)}</Text>
+            </View>
+          )}
           <Text style={styles.name}>{user.name || 'Athlete'}</Text>
-          <Text style={styles.meta}>{user.city} · {user.skill_level} · Pickleball</Text>
+          <Text style={styles.meta}>{[user.city, user.skill_level, 'Pickleball'].filter(Boolean).join(' · ')}</Text>
         </View>
 
         {/* Stats */}
         <View style={styles.statsRow}>
           <Stat val={insights?.stats?.matches_played ?? 0} label="Matches" />
           <View style={styles.statDivider} />
-          <Stat val={`${winRate}%`} label="Win rate" />
+          <Stat val={insights?.stats?.win_rate != null ? `${insights.stats.win_rate}%` : '—'} label="Win rate" />
           <View style={styles.statDivider} />
           <Stat val={insights?.performance_score ?? '—'} label="Score" />
         </View>
@@ -88,7 +93,7 @@ export default function Profile() {
           </Pressable>
         )}
 
-        {insights && (
+        {insights?.has_analysis && insights.chart.length > 0 ? (
           <View style={styles.perfSection} testID="profile-performance">
             <Text style={styles.sectionLabel}>Performance</Text>
             <View style={styles.chartRow}>
@@ -97,15 +102,26 @@ export default function Profile() {
               ))}
             </View>
             <View style={{ marginTop: spacing.md, gap: 8 }}>
-              <PerfLine kind="up" text={insights.strongest} label="Strongest" />
-              <PerfLine kind="down" text={insights.needs_improvement} label="Work on" />
+              {insights.strongest ? <PerfLine kind="up" text={insights.strongest} label="Strongest" /> : null}
+              {insights.needs_improvement ? <PerfLine kind="down" text={insights.needs_improvement} label="Work on" /> : null}
             </View>
-            <Pressable onPress={() => router.push('/ai-coach')} style={styles.aiLink} testID="profile-open-ai">
-              <Text style={styles.aiLinkText}>Talk to AI Coach</Text>
-              <Ionicons name="arrow-forward" size={14} color={c.accent} />
-            </Pressable>
           </View>
-        )}
+        ) : null}
+
+        <Pressable
+          testID="profile-open-ai"
+          onPress={() => router.push('/ai-coach')}
+          style={({ pressed }) => [styles.aiCoachCard, pressed && { backgroundColor: c.bgRaised }]}
+        >
+          <Ionicons name="sparkles-outline" size={20} color={c.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.aiCoachTitle}>AI Coach</Text>
+            <Text style={styles.aiCoachSub}>
+              {insights?.has_analysis ? 'Chat and review your match reports' : 'Upload a match to unlock performance insights'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
+        </Pressable>
 
         {orgs.length > 0 && (
           <View style={styles.menuBlock}>
@@ -169,6 +185,14 @@ export default function Profile() {
   );
 }
 
+function initials(name?: string | null): string {
+  if (!name) return '';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function Stat({ val, label }: { val: any; label: string }) {
   return (
     <View style={styles.statBox}>
@@ -219,6 +243,8 @@ const styles = StyleSheet.create({
     backgroundColor: c.bgElevated,
     marginBottom: spacing.md,
   },
+  avatarInitials: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
+  avatarInitialsText: { color: c.text, fontSize: 30, fontWeight: font.weights.heavy, letterSpacing: 0.5 },
   name: {
     color: c.text, fontSize: font.sizes.xxl,
     fontWeight: font.weights.heavy, letterSpacing: -0.3,
@@ -277,6 +303,18 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   aiLinkText: { color: c.accent, fontSize: font.sizes.sm, fontWeight: font.weights.bold },
+  aiCoachCard: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: c.bgElevated,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  aiCoachTitle: { color: c.text, fontSize: font.sizes.base, fontWeight: font.weights.semibold },
+  aiCoachSub: { color: c.textMuted, fontSize: font.sizes.sm, marginTop: 2 },
   menuBlock: { marginTop: spacing.xl },
   menuGroup: {
     marginHorizontal: spacing.lg,

@@ -87,7 +87,19 @@ async def admin_create_club(body: ClubCreate, admin=Depends(require_platform_adm
         await db.facilities.update_many({"id": {"$in": body.facility_ids}}, {"$set": {"org_id": org["id"]}})
     return strip_id(org)
 
+def _norm_mobile(mobile: str) -> str:
+    raw = (mobile or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if raw.startswith("+"):
+        return "+" + digits
+    if len(digits) == 10:
+        return "+91" + digits
+    if len(digits) == 12 and digits.startswith("91"):
+        return "+" + digits
+    return "+" + digits if digits else raw
+
 async def _get_or_invite_user(mobile: str, name: Optional[str]) -> dict:
+    mobile = _norm_mobile(mobile)
     user = await db.users.find_one({"mobile": mobile}, {"_id": 0})
     if user:
         return user

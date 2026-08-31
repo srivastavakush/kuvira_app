@@ -56,3 +56,10 @@ Build Kuvira Sports — a premium, technology-first, AI-powered sports ecosystem
 - To go live with real SMS: set backend `OTP_PROVIDER=firebase` + Firebase Admin credentials (ADC on Cloud Run or `GOOGLE_APPLICATION_CREDENTIALS`), frontend `EXPO_PUBLIC_AUTH_MODE=firebase`, add `google-services.json`/`GoogleService-Info.plist`, and generate a native build (Firebase phone auth does NOT work in Expo Go).
 - Advanced AI-Coach video analysis (`/api/ai-coach/*`) needs `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`, models) — the simple AI Coach chat works today on the Emergent key.
 - Set `APP_ENV=production`, real `JWT_SECRET`, explicit `CORS_ALLOWED_ORIGINS`, MongoDB Atlas `MONGO_URL` at deploy.
+
+## Update 2026-06 (b) — Persistence bug fix + no-stock-data
+- Root cause of "asks all details every login": tokens were invalidated across restarts (no stable JWT_SECRET) and DB was shared/ephemeral. Fixed with a stable `JWT_SECRET` + dedicated `kuvira_db`.
+- Added `normalize_mobile()` on `/api/auth/otp/start` + `/verify` (and org owner/staff invite) so a number entered as `9998887766` or `+919998887766` always maps to ONE account → returning users are fetched from DB and skip onboarding. Verified: 2nd login returns `onboarded=true` with saved name/city/skill.
+- Removed ALL fabricated/stock data: onboarding no longer injects an `i.pravatar.cc` avatar (avatar stays null unless user provides one); `/api/ai/insights` returns real per-user counts (0 for new users) with null qualitative fields instead of a hardcoded 74/62/chart; Profile renders an initials avatar (no stock face) and hides the performance chart until real AI-Coach analysis exists. One-time migration nulled legacy pravatar avatars on existing users.
+- In production (`APP_ENV=production`) demo seeding is skipped, so the app launches with zero fake users/posts; operators add clubs/facilities via the admin dashboard.
+- Verified: 58/58 backend pytest + full web E2E (login → onboarding → home → sign out → same-number re-login skips onboarding).

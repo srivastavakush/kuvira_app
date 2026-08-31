@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 2 re-tests the reported persistence bug + removal of stock/fabricated data. Backend pytest: 58/58 passing (100%) after fixing 2 old tests to expect normalized +91 mobile and 1 old test path (owner mobile now normalized server-side). Frontend E2E on mobile viewport (390x844) verified end-to-end: fresh number -> OTP 123456 -> onboarding -> /home; profile shows INITIALS avatar 'TU' (testID profile-avatar-initials) with NO stock face image, matches=0/win-rate=—/score=—, NO performance chart section (profile-performance absent), AI Coach card (profile-open-ai) visible. Persistence PROVEN: signed out and re-logged in with same mobile -> app skipped onboarding and landed directly on /home. Admin (9999999999) sees 'Platform admin' entry (profile-admin-dashboard). Server-side normalize_mobile applied in /auth/otp/{start,verify}: '9998887766' and '+919998887766' resolve to identical user id. /api/ai/insights returns real per-user values (performance_score=null, has_analysis=false, chart=[], stats.* real counts). RBAC still works: admin creates club, assigns owner (owner_mobile also now normalized), owner login gets CLUB_OWNER + org workspace; non-member gets 403 on /orgs/{id}/*. Consumer regression clean: bookings 409 on duplicate slot, games 409 when full, posts/like toggle, cart+order, /ai/coach/chat replies.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/clubs/{id}/owner + /api/orgs/{id}/staff", "issue": "Owner/staff mobile was stored as raw (e.g. '9998887777'), while /auth/otp/verify normalizes to '+91...', so a provisioned owner logging in becomes a brand-new PLAYER instead of CLUB_OWNER. FIXED here by adding normalize in org_admin._get_or_invite_user."},
+      {"endpoint": "n/a (existing DB rows)", "issue": "Pre-existing user documents (created before the avatar-fix, e.g. admin 9999999999, TEST_Player, Kush) still hold i.pravatar.cc avatar URLs. New users are clean (verified). Consider a one-time migration: users.updateMany({avatar: /pravatar/}, {$set:{avatar:null}}) if the product requires zero stock avatars everywhere."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Legacy react-native-web warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — cosmetic, from a 3P component."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_persistence_bug.py",
+    "/app/backend/tests/test_kuvira_backend.py",
+    "/app/backend/tests/test_iteration2_features.py",
+    "/app/backend/tests/test_rbac_matrix.py",
+    "/app/test_reports/pytest/pytest_iter2.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: One-time DB migration to null out i.pravatar.cc avatars on pre-existing users so the 'no stock avatar' rule applies to legacy accounts too (admin 9999999999 currently still shows a pravatar face on the profile screen).",
+    "OPTIONAL: Consider moving normalize_mobile() into deps.py and reusing it from server.py + org_admin.py (currently duplicated) so future endpoints that accept mobile stay consistent.",
+    "OPTIONAL: Track down the 'props.pointerEvents is deprecated' warning source (react-native-web upgrade or offending lib)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~640 lines; auth/bookings/games/marketplace could be split into routers similar to features.py and org_admin.py.",
+    "Two copies of normalize_mobile() exist now (server.py and org_admin.py). Extract to deps.py."
+  ],
+  "updated_files": [
+    "/app/backend/org_admin.py (normalize owner/staff mobile in _get_or_invite_user so admin-provisioned owners actually match the +91 login form)",
+    "/app/backend/tests/test_persistence_bug.py (NEW: 12 focused tests for the reported bug)",
+    "/app/backend/tests/test_kuvira_backend.py (test_otp_verify_new_user: assert normalized mobile '+91XXXXXXXXXX')"
+  ],
+  "success_rate": {"backend": "100% (58/58; one transient LLM rate-limit retried once)", "frontend": "100% (login -> onboarding -> home -> profile -> sign out -> re-login skips onboarding -> admin sees Platform admin)"},
+  "seed_data_creation": "Tests use random 10-digit mobiles per run (prefix '7' or '78') and TEST_ prefixed content. Nothing seeded permanently. Existing legacy user rows with pravatar avatars still in DB (not created by these tests).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend URL = /app/frontend/.env EXPO_PUBLIC_BACKEND_URL. Mock OTP=123456. Backend now normalizes any mobile to +91 form; PLATFORM_ADMIN_MOBILES should be listed as '+919999999999'. Existing user rows still hold i.pravatar.cc avatar URLs — the fix only prevents NEW assignments. Correct login flow testIDs: login-mobile-input, login-send-otp-button, otp-input, otp-verify-button, onboarding-name-input, onboarding-city-*, onboarding-skill-*, onboarding-freq-*, onboarding-next, onboarding-finish. Profile testIDs verified: profile-avatar-initials, profile-open-ai, profile-admin-dashboard, profile-signout. The /api/admin/clubs endpoint does not accept owner_mobile in body — call POST /api/admin/clubs then POST /api/admin/clubs/{id}/owner separately.",
+  "rca_of_issue": "Reported bug: login re-asked onboarding every time. Root causes now fixed: (a) unstable JWT_SECRET + non-fixed DB name caused all users to appear new on every restart; (b) frontend normalized to +91 but backend stored the raw string in some paths, so same person appeared as different users on next login. Iteration 2 verifies persistence end-to-end via API (fresh mobile -> onboarding payload -> second verify returns is_new=false with saved name/city/skill) and via web preview (sign out -> re-login skips onboarding). Stock/fabricated data removals verified: onboarding no longer injects pravatar avatar (new users -> avatar=null -> initials shown), /api/ai/insights no longer returns 74/62/chart — returns nulls + real counts. Additional fix applied in org_admin._get_or_invite_user to normalize owner/staff mobile so admin-provisioned CLUB_OWNER accounts survive OTP login."
+}

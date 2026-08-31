@@ -43,6 +43,23 @@ api = APIRouter(prefix="/api")
 # Models
 # ---------------------------------------------------------------------------
 
+def normalize_mobile(mobile: str) -> str:
+    """Canonicalize a phone number so the same person always maps to one account.
+
+    Indian-first (10-digit -> +91), but preserves any explicit country code.
+    Storing a single canonical form is what lets a returning user's profile be
+    fetched from the DB on every subsequent login.
+    """
+    raw = (mobile or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if raw.startswith("+"):
+        return "+" + digits
+    if len(digits) == 10:
+        return "+91" + digits
+    if len(digits) == 12 and digits.startswith("91"):
+        return "+" + digits
+    return "+" + digits if digits else raw
+
 class OTPStart(BaseModel):
     mobile: str
 
@@ -225,14 +242,14 @@ async def readiness():
 
 @api.post("/auth/otp/start")
 async def otp_start(body: OTPStart):
-    mobile = body.mobile.strip()
+    mobile = normalize_mobile(body.mobile)
     if len(mobile) < 6:
         raise KuviraError(400, "INVALID_MOBILE", "Invalid mobile number")
     return await otp_service.send_otp(mobile)
 
 @api.post("/auth/otp/verify")
 async def otp_verify(body: OTPVerify):
-    mobile = body.mobile.strip()
+    mobile = normalize_mobile(body.mobile)
     ok = await otp_service.verify_otp(mobile, body.otp)
     if not ok:
         raise KuviraError(400, "OTP_INVALID", "Invalid or expired OTP")
@@ -270,10 +287,7 @@ async def onboarding(body: OnboardingPayload, user=Depends(current_user)):
     update = body.model_dump()
     update["onboarded"] = True
     update["updated_at"] = utcnow().isoformat()
-    if not update.get("avatar"):
-        # Deterministic avatar
-        idx = abs(hash(user["id"])) % 70
-        update["avatar"] = f"https://i.pravatar.cc/300?img={idx}"
+    # No stock/placeholder avatar — a profile photo is only ever what the user provides.
     await db.users.update_one({"id": user["id"]}, {"$set": update})
     fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return fresh
@@ -577,7 +591,34 @@ async def ai_coach_history(session_id:Optional[str]=None,user=Depends(current_us
     sid=session_id or f"coach-{user['id']}"; msgs=await db.ai_chat.find({'session_id':sid},{'_id':0}).sort('created_at',1).to_list(200); return {'session_id':sid,'messages':msgs}
 @api.get('/ai/insights')
 async def ai_insights(user=Depends(current_user)):
-    matches=user.get('matches_played',0) or 12; return {'performance_score':74,'trend':'+6%','strongest':'Net play & third-shot drops','needs_improvement':'Backhand consistency & endurance','recommendation':'Complete a 20-minute backhand drill 3x this week and add 2 conditioning sessions.','stats':{'matches_played':matches,'win_rate':62,'avg_rally_length':4.8,'training_streak_days':6},'chart':[58,62,60,65,68,70,74]}
+    """Real, per-user activity — never fabricated. Qualitative AI fields stay
+    null until the user has actual analyzed-match data (AI Coach video reports)."""
+    uid = user["id"]
+    matches_played = await db.games.count_documents({"current_players": uid})
+    bookings_count = await db.bookings.count_documents({"user_id": uid})
+    sessions_count = await db.coach_sessions.count_documents({"user_id": uid})
+    try:
+        streak = (await features.training_streak(user)).get("streak_days", 0)
+    except Exception:
+        streak = 0
+    # Performance score/chart come only from analyzed AI Coach matches.
+    analyzed = await db.ai_coach_analytics.count_documents({"user_id": uid})
+    return {
+        "performance_score": None,
+        "trend": None,
+        "strongest": None,
+        "needs_improvement": None,
+        "recommendation": None,
+        "has_analysis": analyzed > 0,
+        "stats": {
+            "matches_played": matches_played,
+            "win_rate": None,
+            "bookings": bookings_count,
+            "coach_sessions": sessions_count,
+            "training_streak_days": streak,
+        },
+        "chart": [],
+    }
 @api.get('/ai/recommendations')
 async def ai_recommendations(user=Depends(current_user)):
     products=await db.products.find({}, {'_id':0}).to_list(6); games=await db.games.find({}, {'_id':0}).to_list(4); return {'insight':'Your playing frequency is up 20% this month. Focus on backhand this week.','products':products[:3],'games':[await _enrich_game(g) for g in games[:3]]}
