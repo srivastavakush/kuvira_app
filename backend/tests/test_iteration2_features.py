@@ -6,7 +6,7 @@ import pytest
 import requests
 
 
-ADMIN_MOBILE = "9000000001"
+ADMIN_MOBILE = "+919999999999"
 OTP = "123456"
 
 

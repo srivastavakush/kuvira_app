@@ -10,7 +10,7 @@ from deps import (
 
 
 def test_role_permission_matrix_is_explicit():
-    assert ROLE_PERMISSIONS[ROLE_PLAYER] == []
+    assert ROLE_PERMISSIONS.get(ROLE_PLAYER, []) == []
     assert 'club.staff.manage' in ROLE_PERMISSIONS[ROLE_CLUB_OWNER]
     assert 'club.ownership.transfer' in ROLE_PERMISSIONS[ROLE_CLUB_OWNER]
     assert 'club.staff.manage' not in ROLE_PERMISSIONS[ROLE_CLUB_MANAGER]

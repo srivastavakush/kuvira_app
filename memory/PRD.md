@@ -45,3 +45,14 @@ Build Kuvira Sports — a premium, technology-first, AI-powered sports ecosystem
 
 ## Next Tasks
 - Coach booking + Clubs (P1), Training plan persistence (P2).
+
+## Update 2026-06 — Preview wiring + role dashboards verified
+- Migrated the full Kuvira codebase from GitHub (srivastavakush/kuvira_app) into the Emergent workspace, preserving protected env vars and the icon-prewarm hook.
+- Added an env-driven auth provider (`frontend/src/auth-provider.ts`): `EXPO_PUBLIC_AUTH_MODE=mock` (default, preview/Expo Go/web — backend OTP `123456`) vs `firebase` (production, native build). The Firebase phone-auth code (client `signInWithPhoneNumber` + Firebase Admin server-side ID-token verify) is intact and switched purely via `.env` (`EXPO_PUBLIC_AUTH_MODE=firebase` + backend `OTP_PROVIDER=firebase`).
+- Configured backend `.env`: APP_ENV, JWT_SECRET, OTP_PROVIDER=mock, PLATFORM_ADMIN_MOBILES=+919999999999, EMERGENT_LLM_KEY, CORS.
+- Verified end-to-end (46/46 backend pytest + web E2E): mock OTP login/onboarding, platform-admin dashboard (create club, assign owner, facility CRUD), club owner/manager/staff workspace (analytics, bookings, members, staff mgmt, ownership transfer), org isolation 403s, court booking (+409 slot conflict), create/join game (+409 full), community posts/likes, marketplace cart/checkout, AI Coach chat (Claude via Emergent key), rankings/achievements/referrals.
+
+## Production readiness (only .env secrets needed)
+- To go live with real SMS: set backend `OTP_PROVIDER=firebase` + Firebase Admin credentials (ADC on Cloud Run or `GOOGLE_APPLICATION_CREDENTIALS`), frontend `EXPO_PUBLIC_AUTH_MODE=firebase`, add `google-services.json`/`GoogleService-Info.plist`, and generate a native build (Firebase phone auth does NOT work in Expo Go).
+- Advanced AI-Coach video analysis (`/api/ai-coach/*`) needs `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`, models) — the simple AI Coach chat works today on the Emergent key.
+- Set `APP_ENV=production`, real `JWT_SECRET`, explicit `CORS_ALLOWED_ORIGINS`, MongoDB Atlas `MONGO_URL` at deploy.

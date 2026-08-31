@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing, font, radius } from '@/src/theme';
 import { Button } from '@/src/components/ui';
 import { api, setToken } from '@/src/api';
-import { confirmPhoneVerification, resendPhoneVerification } from '@/src/firebase';
+import { confirmVerification, resendVerification } from '@/src/auth-provider';
 
 export default function OTP() {
   const router = useRouter();
@@ -19,10 +19,10 @@ export default function OTP() {
     if (otp.length !== 6) { setErr('Enter 6-digit OTP'); return; }
     setLoading(true); setErr(null);
     try {
-      const { idToken, phoneNumber } = await confirmPhoneVerification(otp);
+      const { credential, phoneNumber } = await confirmVerification(String(mobile), otp);
       const expected = String(mobile);
       if (phoneNumber !== expected) throw new Error('Phone number mismatch. Please restart login.');
-      const res: any = await api.otpVerify(expected, idToken);
+      const res: any = await api.otpVerify(expected, credential);
       await setToken(res.token);
       if (!res.user.onboarded) router.replace('/(auth)/onboarding');
       else router.replace('/(tabs)/home');
@@ -36,7 +36,7 @@ export default function OTP() {
   async function resend() {
     setResending(true); setErr(null);
     try {
-      await resendPhoneVerification(String(mobile));
+      await resendVerification(String(mobile));
       setOtp('');
     } catch (e: any) {
       setErr(e?.message || 'Failed to resend OTP');
