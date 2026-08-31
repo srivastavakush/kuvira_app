@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing, font, radius } from '@/src/theme';
 import { Button } from '@/src/components/ui';
 import { api, setToken } from '@/src/api';
-import { confirmPhoneVerification, resendPhoneVerification } from '@/src/firebase';
+import { confirmVerification, resendVerification } from '@/src/auth-provider';
 
 export default function OTP() {
   const router = useRouter();
@@ -19,10 +19,10 @@ export default function OTP() {
     if (otp.length !== 6) { setErr('Enter 6-digit OTP'); return; }
     setLoading(true); setErr(null);
     try {
-      const { idToken, phoneNumber } = await confirmPhoneVerification(otp);
+      const { credential, phoneNumber } = await confirmVerification(String(mobile), otp);
       const expected = String(mobile);
       if (phoneNumber !== expected) throw new Error('Phone number mismatch. Please restart login.');
-      const res: any = await api.otpVerify(expected, idToken);
+      const res: any = await api.otpVerify(expected, credential);
       await setToken(res.token);
       if (!res.user.onboarded) router.replace('/(auth)/onboarding');
       else router.replace('/(tabs)/home');
@@ -36,7 +36,7 @@ export default function OTP() {
   async function resend() {
     setResending(true); setErr(null);
     try {
-      await resendPhoneVerification(String(mobile));
+      await resendVerification(String(mobile));
       setOtp('');
     } catch (e: any) {
       setErr(e?.message || 'Failed to resend OTP');
@@ -54,16 +54,7 @@ export default function OTP() {
         <View style={styles.body}>
           <Text style={styles.headline}>Enter OTP</Text>
           <Text style={styles.sub}>We sent a verification code to {mobile}.</Text>
-          <TextInput
-            testID="otp-input"
-            value={otp}
-            onChangeText={setOtp}
-            keyboardType="number-pad"
-            placeholder="123456"
-            placeholderTextColor={colors.onSurfaceMuted}
-            maxLength={6}
-            style={styles.otpInput}
-          />
+          <TextInput testID="otp-input" value={otp} onChangeText={setOtp} keyboardType="number-pad" placeholder="123456" placeholderTextColor={colors.onSurfaceMuted} maxLength={6} style={styles.otpInput} />
           {err ? <Text style={styles.err} testID="otp-error">{err}</Text> : null}
           <View style={{ height: spacing.xl }} />
           <Button label="Verify & Continue" onPress={verify} loading={loading} testID="otp-verify-button" />
@@ -82,11 +73,7 @@ const styles = StyleSheet.create({
   body: { padding: spacing.xl, flex: 1 },
   headline: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', letterSpacing: -0.3 },
   sub: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: spacing.sm, marginBottom: spacing.xl },
-  otpInput: {
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.md, color: colors.onSurface, fontSize: 30, fontWeight: '800',
-    textAlign: 'center', letterSpacing: 10, paddingVertical: spacing.lg,
-  },
+  otpInput: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, color: colors.onSurface, fontSize: 30, fontWeight: '800', textAlign: 'center', letterSpacing: 10, paddingVertical: spacing.lg },
   err: { color: colors.error, marginTop: spacing.md, fontSize: font.sizes.sm },
   resend: { alignItems: 'center', marginTop: spacing.lg, padding: spacing.sm },
   resendText: { color: colors.onSurface, fontWeight: '600', fontSize: font.sizes.sm },
