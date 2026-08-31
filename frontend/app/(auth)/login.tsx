@@ -6,7 +6,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, spacing, font, radius, HERO_IMAGES } from '@/src/theme';
 import { Button } from '@/src/components/ui';
-import { startPhoneVerification, normalizeIndianPhone } from '@/src/firebase';
+import { startVerification, normalizeIndianPhone, IS_MOCK_AUTH } from '@/src/auth-provider';
 
 export default function Login() {
   const router = useRouter();
@@ -19,7 +19,7 @@ export default function Login() {
       const phone = normalizeIndianPhone(mobile.trim());
       setLoading(true);
       setErr(null);
-      await startPhoneVerification(phone);
+      await startVerification(phone);
       router.push({ pathname: '/(auth)/otp', params: { mobile: phone } });
     } catch (e: any) {
       setErr(e?.message || 'Failed to send OTP');
@@ -43,20 +43,12 @@ export default function Login() {
             <Text style={styles.sub}>We{'\u2019'}ll send you a one-time code.</Text>
             <View style={styles.inputRow}>
               <Text style={styles.cc}>+91</Text>
-              <TextInput
-                testID="login-mobile-input"
-                value={mobile}
-                onChangeText={setMobile}
-                keyboardType="phone-pad"
-                placeholder="Mobile number"
-                placeholderTextColor={colors.onSurfaceMuted}
-                style={styles.input}
-                maxLength={10}
-              />
+              <TextInput testID="login-mobile-input" value={mobile} onChangeText={setMobile} keyboardType="phone-pad" placeholder="Mobile number" placeholderTextColor={colors.onSurfaceMuted} style={styles.input} maxLength={10} />
             </View>
             {err ? <Text testID="login-error" style={styles.err}>{err}</Text> : null}
             <View style={{ height: spacing.lg }} />
             <Button label="Send OTP" onPress={submit} loading={loading} testID="login-send-otp-button" />
+            {IS_MOCK_AUTH ? <Text style={styles.demoHint}>Preview mode: use code 123456 to sign in.</Text> : null}
             <Text style={styles.terms}>By continuing you agree to Kuvira{'\u2019'}s Terms & Privacy.</Text>
           </View>
         </KeyboardAvoidingView>
@@ -77,5 +69,6 @@ const styles = StyleSheet.create({
   cc: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '700', marginRight: spacing.md },
   input: { flex: 1, color: colors.onSurface, fontSize: font.sizes.lg, paddingVertical: spacing.lg },
   err: { color: colors.error, marginTop: spacing.sm, fontSize: font.sizes.sm },
+  demoHint: { color: colors.brandPrimary, textAlign: 'center', marginTop: spacing.md, fontSize: font.sizes.xs, fontWeight: '700' },
   terms: { color: colors.onSurfaceMuted, textAlign: 'center', marginTop: spacing.lg, fontSize: font.sizes.xs },
 });
