@@ -1,3 +1,5 @@
+import { completeAuth } from '@/src/auth-gate';
+import { notifySession } from '@/src/session-events';
 import { useState } from 'react';
 import { View, Text, ScrollView, TextInput, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,7 +13,7 @@ const FREQUENCIES = ['1-2x per week', '3-4x per week', '5+x per week'];
 const MODES = ['Recreational', 'Competitive', 'Both'];
 const GOALS = ['Play more', 'Improve skills', 'Compete in tournaments', 'Meet players', 'Get coaching', 'Buy equipment'];
 const CITIES = ['Bangalore', 'Mumbai', 'Delhi', 'Pune', 'Chennai', 'Hyderabad'];
-const SPORTS = ['Badminton', 'Cricket', 'Football', 'Tennis', 'Pickleball', 'Running'];
+const SPORTS = ['Badminton', 'Cricket', 'Football', 'Tennis', 'Pickleball', 'Padel', 'Basketball', 'Running'];
 
 export default function Onboarding() {
   const router = useRouter();
@@ -39,7 +41,8 @@ export default function Onboarding() {
         sports: [`sport-${sport.toLowerCase()}`], skill_level: skill,
         playing_frequency: freq, competitive: mode, goals,
       });
-      router.replace((next || '/(tabs)/home') as any);
+      notifySession();
+      await completeAuth(router, next);
     } finally { setLoading(false); }
   }
 
@@ -55,7 +58,7 @@ export default function Onboarding() {
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {step === 0 && (
           <View>
-            <Text style={styles.h1}>Welcome to Kuchu Puchu.</Text>
+            <Text style={styles.h1}>Welcome to MatchDrome.</Text>
             <Text style={styles.sub}>Let{'\u2019'}s set up your player identity.</Text>
             <Text style={styles.label}>Your name</Text>
             <TextInput testID="onboarding-name-input" value={name} onChangeText={setName} placeholder="e.g. Arjun" placeholderTextColor={colors.onSurfaceMuted} style={styles.input} />
@@ -72,7 +75,7 @@ export default function Onboarding() {
         {step === 1 && (
           <View>
             <Text style={styles.h1}>What{'\u2019'}s your skill level?</Text>
-            <Text style={styles.sub}>Pickleball · we{'\u2019'}ll personalize matches & training.</Text>
+            <Text style={styles.sub}>Choose a sport to personalize matches and training.</Text>
             <View style={[styles.optRow, { marginBottom: spacing.lg }]}>
               {SPORTS.map((item) => <Pressable key={item} onPress={() => setSport(item)} style={[styles.opt, sport === item && styles.optActive]}><Text style={[styles.optText, sport === item && styles.optTextActive]}>{item}</Text></Pressable>)}
             </View>

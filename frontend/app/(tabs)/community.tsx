@@ -1,3 +1,7 @@
+import { useSession } from '@/src/session';
+import { useRouter } from 'expo-router';
+import { requireAuth } from '@/src/auth-gate';
+import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList, RefreshControl, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,6 +12,8 @@ import { Loader, EmptyState, Divider, Avatar } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 export default function Community() {
+  const { user } = useSession(); const router = useRouter();
+  const [actionError, setActionError] = useState<unknown>();
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -26,23 +32,27 @@ export default function Community() {
   useEffect(() => { load(); }, [load]);
 
   async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
-  async function post() {
+  async function post(authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => post(true))) return;
     if (!text.trim()) return;
     setPosting(true);
     try { await api.createPost({ content: text.trim() }); setText(''); await load(); }
-    finally { setPosting(false); }
+    catch(e) { setActionError(e); } finally { setPosting(false); }
   }
-  async function like(id: string) {
+  async function like(id: string, authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => like(id, true))) return;
+    const previous = posts;
     setPosts((prev) => prev.map((p) => p.id === id ? { ...p, liked: !p.liked, likes: p.likes + (p.liked ? -1 : 1) } : p));
-    try { await api.likePost(id); } catch {}
+    try { await api.likePost(id); } catch(e) { setPosts(previous); setActionError(e); }
   }
 
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="community-screen">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={styles.header}>
-          <Text style={styles.title}>Community</Text>
+          <Text style={styles.title}>Find Your Squad</Text>
         </View>
+        <ErrorBanner error={actionError} />
         <View style={styles.composer} testID="community-composer">
           <TextInput
             testID="community-post-input"
@@ -55,7 +65,7 @@ export default function Community() {
           />
           <Pressable
             testID="community-post-btn"
-            onPress={post}
+            onPress={() => post()}
             disabled={posting || !text.trim()}
             style={[styles.postBtn, (!text.trim() || posting) && { opacity: 0.4 }]}
           >

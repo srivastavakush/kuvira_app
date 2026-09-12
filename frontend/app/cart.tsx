@@ -1,3 +1,6 @@
+import { openCheckout, verifiedPayment } from '@/src/payments';
+import { ErrorBanner } from '@/src/components/states';
+import { InputField } from '@/src/components/ui';
 import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,23 +17,34 @@ export default function Cart() {
   const router = useRouter();
   const { user } = useSession();
   const [cart, setCart] = useState<any>(null);
+  const [error, setError] = useState<unknown>();
+  const [paymentId, setPaymentId] = useState('');
+  const [line1, setLine1] = useState('');
+  const [city, setCity] = useState('');
+  const [pincode, setPincode] = useState('');
   const [placing, setPlacing] = useState(false);
   const [order, setOrder] = useState<any>(null);
 
-  const load = useCallback(async () => { setCart(await api.cart()); }, []);
+  const load = useCallback(async () => { if (!user) return; setError(null); try { setCart(await api.cart()); } catch (e) { setError(e); } }, [user?.id]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  async function remove(pid: string) { setCart(await api.removeFromCart(pid)); }
+  async function remove(pid: string) { try { setCart(await api.removeFromCart(pid)); } catch (e) { setError(e); } }
 
-  async function checkout() {
-    if (!requireAuth(user, router, '/cart')) return;
+  async function checkout(authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => checkout(true))) return;
+    if (!line1.trim() || !city.trim() || !/^[1-9]\d{5}$/.test(pincode)) { setError('Enter your delivery address, city and six digit PIN code.'); return; }
     setPlacing(true);
     try {
-      const res = await api.createOrder({ line1: '123 Court Road', city: 'Bangalore', pincode: '560001' });
-      setOrder(res);
-    } finally { setPlacing(false); }
+      setError(null);
+      if (paymentId) { setOrder(await verifiedPayment(paymentId)); return; }
+      const res = await api.createOrder({ line1: line1.trim(), city: city.trim(), pincode });
+      if (res.checkout_url && res.payment?.id) { setPaymentId(res.payment.id); await openCheckout(res); setOrder(await verifiedPayment(res.payment.id)); }
+      else setOrder(res);
+    } catch (e) { setError(e); } finally { setPlacing(false); }
   }
 
+  if (!user) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}><EmptyState title="Your gear starts here" subtitle="Sign in to view your cart." cta="Sign in" onCta={() => requireAuth(user, router, '/cart')} /></SafeAreaView>;
+  if (!cart && error) return <SafeAreaView style={{ flex: 1 }}><ErrorBanner error={error} retry={load} /></SafeAreaView>;
   if (!cart) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}><Loader /></SafeAreaView>;
 
   if (order) {
@@ -51,6 +65,7 @@ export default function Cart() {
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="cart-screen">
       <ScreenHeader title="Cart" onBack={() => router.back()} testID="cart" />
+      <ErrorBanner error={error} retry={load} />
 
       {cart.items.length === 0 ? (
         <EmptyState
@@ -64,6 +79,7 @@ export default function Cart() {
       ) : (
         <>
           <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 160, gap: spacing.md }}>
+            <View style={{ padding: 16, gap: 12 }}><InputField label="Delivery address" value={line1} onChangeText={setLine1} /><InputField label="City" value={city} onChangeText={setCity} /><InputField label="PIN code" value={pincode} onChangeText={setPincode} keyboardType="number-pad" maxLength={6} /></View>
             {cart.items.map((it: any) => (
               <View key={it.product.id} style={styles.item} testID={`cart-item-${it.product.id}`}>
                 <Image source={{ uri: it.product.image }} style={styles.itemImg} contentFit="cover" />
@@ -93,7 +109,7 @@ export default function Cart() {
             <Button
               testID="cart-checkout-btn"
               loading={placing}
-              onPress={checkout}
+              onPress={() => checkout()}
               label={`Checkout · ₹${cart.total.toLocaleString('en-IN')}`}
             />
           </View>

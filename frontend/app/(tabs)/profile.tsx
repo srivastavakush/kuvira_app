@@ -1,3 +1,5 @@
+import { sportsLabel } from '@/src/sports';
+import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +20,8 @@ export default function Profile() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [orgs, setOrgs] = useState<any[]>([]);
   const [caps, setCaps] = useState<any>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<unknown>();
   const [savingPhoto, setSavingPhoto] = useState(false);
 
   useEffect(() => {
@@ -57,10 +61,12 @@ export default function Profile() {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
+      setPhotoError(null); setPreviewPhoto(asset.uri);
       setSavingPhoto(true);
       await api.uploadMyAvatar(asset.uri, asset.fileName || 'profile.jpg', asset.mimeType || 'image/jpeg');
       await refresh();
     } catch (error: any) {
+      setPreviewPhoto(null); setPhotoError('Your photo couldn’t be saved. Tap your photo to choose it again.');
       const message = String(error?.message || '');
       const isCloudAsset = /PHPhotosErrorDomain|3164/i.test(message);
       Alert.alert(
@@ -80,7 +86,7 @@ export default function Profile() {
         <View style={styles.guestIcon}>
           <Ionicons name="person-outline" size={28} color={c.textSecondary} />
         </View>
-        <Text style={styles.guestTitle}>Your Kuchu Puchu profile</Text>
+        <Text style={styles.guestTitle}>Your MatchDrome profile</Text>
         <Text style={styles.guestSubtitle}>Sign in to manage your games, bookings and personalized experience.</Text>
         <View style={{ alignSelf: 'stretch', maxWidth: 320, marginTop: spacing.xl }}>
           <Button label="Sign in" onPress={() => router.push('/(auth)/login')} testID="profile-login-btn" />
@@ -97,8 +103,8 @@ export default function Profile() {
         {/* Header */}
         <View style={styles.header}>
           <Pressable onPress={changeProfilePhoto} disabled={savingPhoto} style={styles.avatarButton} testID="profile-change-avatar" accessibilityRole="button" accessibilityLabel="Change profile photo">
-            {user.avatar ? (
-              <Image source={{ uri: user.avatar }} style={styles.avatar} testID="profile-avatar-image" />
+            {previewPhoto || user.avatar ? (
+              <Image source={{ uri: previewPhoto || user.avatar || undefined }} style={styles.avatar} testID="profile-avatar-image" />
             ) : (
               <View style={[styles.avatar, styles.avatarInitials]} testID="profile-avatar-initials">
                 <Text style={styles.avatarInitialsText}>{initials(user.name)}</Text>
@@ -109,9 +115,10 @@ export default function Profile() {
             </View>
           </Pressable>
           <Text style={styles.name}>{user.name || 'Athlete'}</Text>
-          <Text style={styles.meta}>{[user.city, user.skill_level, 'Pickleball'].filter(Boolean).join(' · ')}</Text>
+          <Text style={styles.meta}>{[user.city, user.skill_level, sportsLabel(user)].filter(Boolean).join(' · ')}</Text>
         </View>
 
+        <ErrorBanner error={photoError} retry={changeProfilePhoto} />
         {/* Stats */}
         <View style={styles.statsRow}>
           <Stat val={insights?.stats?.matches_played ?? 0} label="Matches" />

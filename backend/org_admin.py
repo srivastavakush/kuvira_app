@@ -877,7 +877,9 @@ async def org_analytics(org_id: str, user=Depends(require_org_permission("club.a
     bookings = await db.bookings.find(
         {"facility_id": {"$in": fids}}, {"_id": 0, "price": 1, "status": 1}
     ).to_list(1000)
-    revenue = sum(b.get("price", 0) for b in bookings if b.get("status") != "cancelled")
+    membership = await db.organization_memberships.find_one({"org_id": org_id, "user_id": user["id"], "status": "active"}, {"_id": 0, "role": 1})
+    can_finance = user.get("is_platform_admin") or (membership or {}).get("role") in (ROLE_CLUB_OWNER, ROLE_CLUB_ADMIN)
+    revenue = sum(b.get("price", 0) for b in bookings if b.get("status") == "confirmed") if can_finance else None
     confirmed = sum(1 for b in bookings if b.get("status") == "confirmed")
     cancelled = sum(1 for b in bookings if b.get("status") == "cancelled")
     games = await db.games.count_documents({"facility_id": {"$in": fids}})
@@ -1133,3 +1135,41 @@ async def org_audit_log(
         entry["actor"] = actor
     return {"count": len(logs), "entries": logs}
 
+
+# Read-only MatchDrome dashboard projections over existing collections.
+# No migrations, new storage, or new write permissions are introduced here.
+@router.get("/admin/overview")
+async def admin_overview(admin=Depends(require_platform_admin())):
+    import asyncio
+    names = ["users", "bookings", "organizations", "events", "tournaments", "ai_coach_jobs"]
+    counts = await asyncio.gather(*(db[name].count_documents({"is_demo": {"$ne": True}}) for name in names))
+    payment_groups = await db.payment_transactions.aggregate([
+        {"$group": {"_id": "$status", "count": {"$sum": 1}, "amount": {"$sum": {"$convert": {"input": "$amount", "to": "double", "onError": 0, "onNull": 0}}}}}
+    ]).to_list(30)
+    jobs = await db.ai_coach_jobs.aggregate([{"$group": {"_id": "$status", "count": {"$sum": 1}}}]).to_list(30)
+    return {"counts": dict(zip(names, counts)), "payments": payment_groups, "ai_jobs": jobs, "generated_at": utcnow().isoformat()}
+
+
+@router.get("/admin/users")
+async def admin_users(q: str = "", admin=Depends(require_platform_admin())):
+    import re
+    query = {"$or": [{"name": {"$regex": re.escape(q[:100]), "$options": "i"}}, {"mobile": {"$regex": re.escape(q[:100])}}]} if q else {}
+    return await db.users.find(query, {"_id": 0, "id": 1, "name": 1, "mobile": 1, "city": 1, "avatar": 1, "onboarded": 1, "is_platform_admin": 1}).sort("created_at", -1).to_list(100)
+
+
+@router.get("/admin/transactions")
+async def admin_transactions(admin=Depends(require_platform_admin())):
+    # Allowlist deliberately excludes checkout tokens, gateway payloads and signatures.
+    return await db.payment_transactions.find({}, {"_id": 0, "id": 1, "txnid": 1, "status": 1, "amount": 1, "resource": 1, "created_at": 1, "provider": 1}).sort("created_at", -1).to_list(100)
+
+
+@router.get("/admin/system-health")
+async def admin_system_health(admin=Depends(require_platform_admin())):
+    database = "unavailable"
+    try:
+        await db.command("ping")
+        database = "connected"
+    except Exception:
+        pass
+    heartbeat = await db.ai_coach_jobs.find_one({"heartbeat_at": {"$exists": True}}, {"_id": 0, "heartbeat_at": 1, "status": 1}, sort=[("heartbeat_at", -1)]) if database == "connected" else None
+    return {"api": "responding", "database": database, "worker_last_observation": heartbeat, "worker_status": "not monitored", "knowledge_refresh": "not monitored"}

@@ -1,3 +1,4 @@
+import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,17 +17,19 @@ export default function GameDetail() {
   const router = useRouter();
   const { user } = useSession();
   const [g, setG] = useState<any>(null);
+  const [error, setError] = useState<unknown>();
   const [joining, setJoining] = useState(false);
 
-  async function load() { setG(await api.game(String(id))); }
+  async function load() { setError(null); try { setG(await api.game(String(id))); } catch(e) { setError(e); } }
   useEffect(() => { load(); }, [id]);
 
-  async function join() {
-    if (!requireAuth(user, router, `/game/${id}`)) return;
+  async function join(authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => join(true))) return;
     setJoining(true);
-    try { const res = await api.joinGame(String(id)); setG(res); } finally { setJoining(false); }
+    try { const res = await api.joinGame(String(id)); setG(res); } catch(e) { setError(e); } finally { setJoining(false); }
   }
 
+  if (!g && error) return <ErrorBanner error={error} retry={load} />;
   if (!g) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
   const joined = user && g.current_players?.includes(user.id);
   const full = g.slots_remaining <= 0;
@@ -49,7 +52,7 @@ export default function GameDetail() {
           </View>
         </View>
 
-        <View style={styles.body}>
+        <View style={styles.body}><ErrorBanner error={error} retry={load} />
           <View style={styles.infoRow}>
             <Info icon="time" label="Duration" value={`${g.duration_min} min`} />
             <Info icon="cash" label="Per person" value={`₹${g.price_per_person}`} />
@@ -83,7 +86,7 @@ export default function GameDetail() {
           testID="game-join-btn"
           disabled={joined || full || joining}
           style={[styles.joinBtn, (joined || full) && { backgroundColor: colors.surfaceTertiary }]}
-          onPress={join}
+          onPress={() => join()}
         >
           <Text style={[styles.joinBtnText, (joined || full) && { color: colors.onSurfaceSecondary }]}>
             {joined ? 'You\'re in' : full ? 'Game full' : joining ? 'Joining…' : `Join · ₹${g.price_per_person}`}
@@ -111,8 +114,8 @@ const styles = StyleSheet.create({
   heroBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg },
   badge: { alignSelf: 'flex-start', backgroundColor: colors.brandTertiary, borderColor: colors.brandPrimary, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm, marginBottom: 6 },
   badgeText: { color: colors.brandPrimary, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  title: { color: colors.onSurface, fontSize: font.sizes.xxl, fontWeight: '800', letterSpacing: -0.3 },
-  meta: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: 4 },
+  title: { color: '#FFFFFF', fontSize: font.sizes.xxl, fontWeight: '800', letterSpacing: -0.3 },
+  meta: { color: '#E6EDF3', fontSize: font.sizes.base, marginTop: 4 },
   body: { padding: spacing.lg },
   infoRow: { flexDirection: 'row', gap: spacing.md },
   infoBox: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', borderWidth: 1, borderColor: colors.border, gap: 4 },

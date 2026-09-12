@@ -1,4 +1,5 @@
 // Entry — home is public; authentication is requested only for protected actions.
+import { Brand } from '@/src/components/brand';
 import { useEffect } from 'react';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -15,7 +16,7 @@ export default function Index() {
 
   return (
     <View style={styles.wrap} testID="splash-screen">
-      <Text style={styles.brand}>KUCHU PUCHU</Text>
+      <Brand />
       <Text style={styles.tagline}>Good Games. Great People.</Text>
       <ActivityIndicator size="small" color={c.textFaint} style={{ marginTop: spacing.xl }} />
     </View>

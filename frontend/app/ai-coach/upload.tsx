@@ -1,3 +1,6 @@
+import { SportPicker } from '@/src/components/sport-picker';
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
 import { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +16,11 @@ const LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'Pro'];
 
 export default function Upload() {
   const router = useRouter();
+  const { user } = useSession();
+  const [sport, setSport] = useState('badminton');
+  const [goal, setGoal] = useState('');
+  const [matchId, setMatchId] = useState('');
+  const [videoId, setVideoId] = useState('');
   const [asset, setAsset] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [opponent, setOpponent] = useState('');
   const [result, setResult] = useState<string | undefined>(undefined);
@@ -50,20 +58,26 @@ export default function Upload() {
     }
   }
 
-  async function submit() {
+  async function submit(authenticated = false) {
+    if (uploading) return;
+    if (!authenticated && !requireAuth(user, router, undefined, () => submit(true))) return;
+    if (!goal.trim()) { Alert.alert('Choose a goal', 'Tell your coach what you want to improve.'); return; }
+    if (asset?.fileSize && asset.fileSize > 500 * 1024 * 1024) { Alert.alert('Video too large', 'Choose a video under 500 MB.'); return; }
     if (!asset) { Alert.alert('Select a video', 'Pick a match video from your library first.'); return; }
     setUploading(true);
     try {
       setStage('Creating match');
-      const match: any = await api.aiCoach.createMatch({
-        sport: 'pickleball', player_level: level, result, opponent_name: opponent || undefined, notes: notes || undefined,
+      const match: any = matchId ? { id: matchId } : await api.aiCoach.createMatch({
+        sport, player_level: level, result, opponent_name: opponent || undefined, notes: `Goal: ${goal.trim()}\n${notes}`,
       });
+      setMatchId(match.id);
       setStage('Uploading video');
-      const uploaded: any = await api.aiCoach.uploadVideo(
+      const uploaded: any = videoId ? { id: videoId } : await api.aiCoach.uploadVideo(
         asset.uri, match.id,
         (asset.fileName as any) || 'match.mp4',
         (asset.mimeType as any) || 'video/mp4',
       );
+      setVideoId(uploaded.id);
       setStage('Starting analysis');
       const job: any = await api.aiCoach.startAnalysis(match.id, uploaded.id);
       router.replace(`/ai-coach/analyzing/${job.id}?matchId=${match.id}`);
@@ -81,9 +95,10 @@ export default function Upload() {
     <SafeAreaView style={styles.wrap} edges={['top']} testID="ai-coach-upload">
       <ScreenHeader title="Analyze a match" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
+        <View pointerEvents={uploading || !!matchId ? "none" : "auto"}><SportPicker value={sport} onChange={setSport} /><Text style={styles.fieldLabel}>Your level</Text><View style={styles.chipRow}>{LEVELS.map(lv => <Pressable key={lv} onPress={() => setLevel(lv)} style={[styles.chip, level === lv && styles.chipActive]}><Text style={[styles.chipText, level === lv && styles.chipTextActive]}>{lv}</Text></Pressable>)}</View><InputField label="Your goal" value={goal} onChangeText={setGoal} placeholder="e.g. Improve footwork and consistency" /></View><Text style={{ color: c.textSecondary, lineHeight: 21, marginBottom: 16 }}>Keep the playing area and player visible. Coaching depends on footage quality and the models available for your sport. Unmeasured speed, shot types and tactics will not be reported as facts.</Text>
         {/* Video picker */}
         {!asset ? (
-          <Pressable onPress={pick} style={styles.dropzone} testID="upload-pick">
+          <Pressable disabled={uploading || !!matchId} onPress={pick} style={styles.dropzone} testID="upload-pick">
             <View style={styles.dzIcon}><Ionicons name="cloud-upload-outline" size={24} color={c.text} /></View>
             <Text style={styles.dzTitle}>Select a match video</Text>
             <Text style={styles.dzSub}>MP4, MOV or M4V. Up to 500 MB.</Text>
@@ -93,14 +108,14 @@ export default function Upload() {
             <View style={styles.assetHead}>
               <Ionicons name="videocam-outline" size={18} color={c.text} />
               <Text style={styles.assetName} numberOfLines={1}>{asset.fileName || 'Selected video'}</Text>
-              <Pressable onPress={() => setAsset(null)} hitSlop={8}><Ionicons name="close" size={18} color={c.textMuted} /></Pressable>
+              <Pressable disabled={uploading || !!matchId} onPress={() => setAsset(null)} hitSlop={8}><Ionicons name="close" size={18} color={c.textMuted} /></Pressable>
             </View>
             <View style={styles.assetMetaRow}>
               {durationSec != null ? <Badge label={`${durationSec}s`} variant="neutral" size="sm" /> : null}
               {sizeMB ? <Badge label={`${sizeMB} MB`} variant="neutral" size="sm" /> : null}
               {asset.width && asset.height ? <Badge label={`${asset.width}×${asset.height}`} variant="neutral" size="sm" /> : null}
             </View>
-            <Pressable onPress={pick} style={styles.reselect}><Text style={styles.reselectText}>Choose a different video</Text></Pressable>
+            <Pressable disabled={uploading || !!matchId} onPress={pick} style={styles.reselect}><Text style={styles.reselectText}>Choose a different video</Text></Pressable>
           </View>
         )}
 
@@ -114,15 +129,6 @@ export default function Upload() {
           {RESULTS.map((r) => (
             <Pressable key={r} onPress={() => setResult(result === r ? undefined : r)} style={[styles.chip, result === r && styles.chipActive]} testID={`upload-result-${r}`}>
               <Text style={[styles.chipText, result === r && styles.chipTextActive]}>{r[0].toUpperCase() + r.slice(1)}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <Text style={styles.fieldLabel}>Your level</Text>
-        <View style={styles.chipRow}>
-          {LEVELS.map((lv) => (
-            <Pressable key={lv} onPress={() => setLevel(lv)} style={[styles.chip, level === lv && styles.chipActive]} testID={`upload-level-${lv}`}>
-              <Text style={[styles.chipText, level === lv && styles.chipTextActive]}>{lv}</Text>
             </Pressable>
           ))}
         </View>
@@ -143,9 +149,9 @@ export default function Upload() {
       <View style={styles.footer}>
         <Button
           label={uploading ? 'Uploading…' : 'Start analysis'}
-          onPress={submit}
+          onPress={() => submit()}
           loading={uploading}
-          disabled={!asset}
+          disabled={!asset || !goal.trim()}
           testID="upload-submit"
         />
       </View>
@@ -168,7 +174,7 @@ const styles = StyleSheet.create({
   sectionLabel: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: font.weights.semibold, marginTop: spacing.xl, marginBottom: spacing.md },
   fieldLabel: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1, fontWeight: font.weights.semibold, marginBottom: 6 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
-  chip: { paddingHorizontal: spacing.md, height: 36, borderRadius: radius.pill, backgroundColor: c.bgElevated, justifyContent: 'center' },
+  chip: { paddingHorizontal: spacing.md, minHeight: 44, borderRadius: radius.pill, backgroundColor: c.bgElevated, justifyContent: 'center' },
   chipActive: { backgroundColor: c.text },
   chipText: { color: c.textSecondary, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
   chipTextActive: { color: c.bg, fontWeight: font.weights.bold },

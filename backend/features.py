@@ -234,7 +234,7 @@ ACHIEVEMENTS = [
     {"id": "gear_up", "title": "Geared Up", "desc": "Place your first order", "icon": "bag"},
     {"id": "coached", "title": "Student of the Game", "desc": "Book a coaching session", "icon": "school"},
     {"id": "streak_3", "title": "On a Streak", "desc": "3-day training streak", "icon": "flame"},
-    {"id": "early_adopter", "title": "Early Adopter", "desc": "Join Kuvira", "icon": "star"},
+    {"id": "early_adopter", "title": "Early Adopter", "desc": "Join MatchDrome", "icon": "star"},
 ]
 
 
@@ -287,7 +287,7 @@ async def my_referral(user=Depends(current_user)):
     rewarded = await db.referral_rewards.count_documents({"referrer_id": user["id"]})
     return {
         "code": code,
-        "share_message": f"Join me on Kuvira Sports! Use my code {code} and we both earn ₹{REFERRAL_REWARD} in credits.",
+        "share_message": f"Join me on MatchDrome! Use my code {code} and we both earn ₹{REFERRAL_REWARD} in credits.",
         "referrals": referred,
         "rewards_earned": rewarded * REFERRAL_REWARD,
         "credits": user.get("credits", 0),

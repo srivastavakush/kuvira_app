@@ -1,4 +1,4 @@
-// Kuchu Puchu — shared UI primitives.
+// MatchDrome — shared UI primitives.
 // Design principles:
 //   • gold is an accent, not decoration
 //   • quiet surfaces, clear hierarchy, generous spacing
@@ -108,6 +108,8 @@ export function ScreenHeader({
     >
       {onBack ? (
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
           testID={testID ? `${testID}-back` : 'header-back'}
           onPress={onBack}
           hitSlop={12}
@@ -263,7 +265,7 @@ export function Button({
       : 'transparent';
   const bw = variant === 'ghost' || variant === 'destructive' ? 1 : 0;
 
-  const heights: Record<BtnSize, number> = { sm: 40, md: 48, lg: 54 };
+  const heights: Record<BtnSize, number> = { sm: 44, md: 48, lg: 54 };
   const paddings: Record<BtnSize, number> = { sm: spacing.md, md: spacing.lg, lg: spacing.xl };
   const fontSize = size === 'sm' ? font.sizes.sm : font.sizes.base;
 
@@ -272,6 +274,9 @@ export function Button({
       testID={testID}
       onPress={onPress}
       disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
       style={({ pressed }) => [
         btnStyles.base,
         {
@@ -324,7 +329,7 @@ export function IconButton({
   icon,
   onPress,
   testID,
-  size = 40,
+  size = 44,
   color,
   bg = c.bgElevated,
   style,
@@ -682,7 +687,7 @@ const chipStyles = StyleSheet.create({
     alignItems: 'center',
   },
   chip: {
-    height: 34,
+    minHeight: 44,
     flexShrink: 0,
     borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
@@ -744,7 +749,7 @@ const segStyles = StyleSheet.create({
   },
   item: {
     flex: 1,
-    height: 36,
+    minHeight: 44,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',

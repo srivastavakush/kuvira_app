@@ -1,3 +1,4 @@
+import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,12 +17,15 @@ export default function PlayerDetail() {
   const router = useRouter();
   const { user } = useSession();
   const [p, setP] = useState<any>(null);
+  const [error, setError] = useState<unknown>();
 
-  useEffect(() => { (async () => setP(await api.player(String(id))))(); }, [id]);
+  async function load() { setError(null); try { setP(await api.player(String(id))); } catch(e) { setError(e); } }
+  useEffect(() => { load(); }, [id]);
+  if (error) return <SafeAreaView style={{ flex: 1 }}><ErrorBanner error={error} retry={load} /></SafeAreaView>;
   if (!p) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
 
-  const winRate = Math.round(((p.wins || 0) / Math.max(1, p.matches_played || 0)) * 100);
-  const startGame = () => { if (requireAuth(user, router, `/player/${id}`)) router.push('/create-game'); };
+  const winRate = typeof p.wins === 'number' && p.matches_played > 0 ? Math.round((p.wins / p.matches_played) * 100) : null;
+  const startGame = () => { if (requireAuth(user, router, '/create-game')) router.push('/create-game'); };
 
   return (
     <View style={styles.wrap} testID="player-detail-screen">
@@ -51,7 +55,7 @@ export default function PlayerDetail() {
         <View style={styles.body}>
           <View style={styles.statsRow}>
             <Stat val={p.matches_played} label="Matches" />
-            <Stat val={`${winRate}%`} label="Win Rate" />
+            <Stat val={winRate == null ? '—' : `${winRate}%`} label="Win Rate" />
             <Stat val={p.rating} label="Rating" />
           </View>
 

@@ -1,4 +1,6 @@
-// API client for the Kuchu Puchu backend.
+import { notifySession } from './session-events';
+import { friendlyError } from './errors';
+// API client for the MatchDrome backend.
 import Constants from 'expo-constants';
 import { File as ExpoFile, UploadType } from 'expo-file-system';
 import { Platform } from 'react-native';
@@ -32,10 +34,11 @@ const BASE = resolveBaseUrl();
 export const apiBaseUrl = BASE;
 const TOKEN_KEY = 'kuvira_auth_token';
 export async function getToken(): Promise<string|null>{return await storage.secureGet<string>(TOKEN_KEY,'');}
-export async function setToken(token:string){await storage.secureSet(TOKEN_KEY,token);} export async function clearToken(){await storage.secureRemove(TOKEN_KEY);}
+export async function setToken(token:string){const saved = await storage.secureSet(TOKEN_KEY,token);if (!saved) throw new Error('Could not save your session. Please allow storage and try again.');notifySession();} export async function clearToken(){await storage.secureRemove(TOKEN_KEY);notifySession();}
+export class ApiError extends Error { constructor(public status: number, message: string) { super(message); this.name = 'ApiError'; } }
 export class ApiConnectionError extends Error {
   constructor() {
-    super('Could not reach the server. Check that the backend is running and try again.');
+    super('Connection interrupted. Check your internet and try again.');
     this.name = 'ApiConnectionError';
   }
 }
@@ -45,10 +48,13 @@ async function request<T=any>(path:string,opts:RequestInit={}):Promise<T>{
   const headers:Record<string,string>={'Content-Type':'application/json',...(opts.headers as Record<string,string>|undefined)};
   if(token)headers.Authorization=`Bearer ${token}`;
   let res: Response;
-  try { res=await fetch(`${BASE}/api${path}`,{...opts,headers}); }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try { res=await fetch(`${BASE}/api${path}`,{...opts,headers,signal:opts.signal || controller.signal}); }
   catch { throw new ApiConnectionError(); }
+  finally { clearTimeout(timeout); }
   const text=await res.text();let data:any=null;try{data=text?JSON.parse(text):null}catch{data=text}
-  if(!res.ok)throw new Error((data?.error?.message||data?.detail||`HTTP ${res.status}`));return data as T;
+  if(!res.ok)throw new ApiError(res.status, friendlyError(data?.error?.message||data?.detail||`HTTP ${res.status}`));return data as T;
 }
 
 /**
@@ -68,13 +74,14 @@ async function uploadMultipart<T=any>(path:string,fileUri:string,_fileName:strin
   }catch(error:any){
     const message=String(error?.message||'');
     if(/network|connection|timed out|failed to fetch/i.test(message))throw new ApiConnectionError();
-    throw new Error(message||'Could not read the selected file. Please choose it again.');
+    throw new Error(friendlyError(message, 'Could not read the selected file. Please choose it again.'));
   }
   let data:any=null;try{data=result.body?JSON.parse(result.body):null}catch{data=result.body}
-  if(result.status<200||result.status>=300)throw new Error((data?.error?.message||data?.detail)||`HTTP ${result.status}`);
+  if(result.status<200||result.status>=300)throw new Error(friendlyError((data?.error?.message||data?.detail)||`HTTP ${result.status}`));
   return data as T;
 }
 export const api={
+  adminOverview:()=>request('/admin/overview'), adminUsers:(q='')=>request(`/admin/users?q=${encodeURIComponent(q)}`), adminTransactions:()=>request('/admin/transactions'), adminSystemHealth:()=>request('/admin/system-health'),
   health:()=>request('/health'), otpStart:(mobile:string)=>request('/auth/otp/start',{method:'POST',body:JSON.stringify({mobile})}), otpVerify:(mobile:string,otp:string)=>request('/auth/otp/verify',{method:'POST',body:JSON.stringify({mobile,otp})}), me:()=>request('/me'), onboarding:(p:any)=>request('/onboarding',{method:'POST',body:JSON.stringify(p)}),
   sports:()=>request('/sports'), facilities:(p:any={})=>request(`/facilities${Object.keys(p).length?'?'+new URLSearchParams(p).toString():''}`), facility:(id:string)=>request(`/facilities/${id}`), availability:(id:string,date:string)=>request(`/facilities/${id}/availability?date=${date}`),
   facilitiesNearby:(lat:number,lng:number,radiusKm=25,sport?:string)=>request(`/facilities/nearby?lat=${lat}&lng=${lng}&radius_km=${radiusKm}${sport?'&sport='+sport:''}`),

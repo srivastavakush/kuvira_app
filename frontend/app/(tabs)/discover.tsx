@@ -1,3 +1,7 @@
+import { openCheckout, verifiedPayment } from '@/src/payments';
+import { ErrorBanner } from '@/src/components/states';
+import { Button } from '@/src/components/ui';
+import { sportsLabel } from '@/src/sports';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,41 +25,51 @@ const CATEGORIES = [
 
 export default function Discover() {
   const router = useRouter();
-  const { register: pendingTournament } = useLocalSearchParams<{ register?: string }>();
+  const { category, sport } = useLocalSearchParams<{ category?: string; sport?: string }>();
   const { user } = useSession();
   const [q, setQ] = useState('');
-  const [cat, setCat] = useState('all');
+  const [cat, setCat] = useState(category || 'all');
+  const [error, setError] = useState<unknown>();
+  const [notice, setNotice] = useState('');
+  const [registering, setRegistering] = useState(false);
+  const [paymentId, setPaymentId] = useState('');
+  useEffect(() => { if (category && CATEGORIES.some(c => c.key === category)) setCat(category); }, [category]);
   const [loading, setLoading] = useState(true);
   const [facilities, setFacilities] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [f, e, t, co] = await Promise.all([api.facilities(), api.events(), api.tournaments(), api.coaches()]);
-        setFacilities(f); setEvents(e); setTournaments(t); setCoaches(co);
-      } finally { setLoading(false); }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (user && pendingTournament) {
-      api.registerTournament(String(pendingTournament)).catch(() => {}).finally(() => router.setParams({ register: undefined }));
-    }
-  }, [pendingTournament, router, user]);
-
-  const byQ = <T extends { name: string }>(arr: T[]) =>
-    q ? arr.filter((x) => x.name.toLowerCase().includes(q.toLowerCase())) : arr;
+  async function load() {
+    setLoading(true); setError(null);
+    const results = await Promise.allSettled([api.facilities(), api.events(), api.tournaments(), api.coaches()]);
+    const setters = [setFacilities, setEvents, setTournaments, setCoaches];
+    results.forEach((r, i) => { if (r.status === 'fulfilled' && Array.isArray(r.value)) setters[i](r.value); });
+    if (results.some(r => r.status === 'rejected')) setError('Some results couldn’t load. Please try again.');
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+  const byQ = <T extends { name: string }>(arr: T[]) => arr.filter(x => (!q || (x.name || '').toLowerCase().includes(q.toLowerCase())) && (!sport || sportsLabel(x).toLowerCase().includes(sport.toLowerCase())));
   const showFac = cat === 'all' || cat === 'facilities';
   const showEv = cat === 'all' || cat === 'events';
   const showTr = cat === 'all' || cat === 'tournaments';
   const showCo = cat === 'all' || cat === 'coaches';
 
+  async function performRegistration(tournamentId: string) {
+    if (registering) return;
+    setRegistering(true); setError(null); setNotice('');
+    try {
+      if (paymentId) { await verifiedPayment(paymentId); setPaymentId(''); setNotice('You’re registered. Game on!'); return; }
+      const res = await api.registerTournament(tournamentId);
+      if (res.checkout_url && res.payment?.id) {
+        setPaymentId(res.payment.id); await openCheckout(res);
+        await verifiedPayment(res.payment.id); setPaymentId('');
+      }
+      setNotice('You’re registered. Game on!');
+    } catch (e) { setError(e); } finally { setRegistering(false); }
+  }
   function register(tournamentId: string) {
-    if (!requireAuth(user, router, `/(tabs)/discover?register=${tournamentId}`)) return;
-    api.registerTournament(tournamentId).catch(() => {});
+    if (requireAuth(user, router, undefined, () => performRegistration(tournamentId))) performRegistration(tournamentId);
   }
 
   return (
@@ -76,6 +90,10 @@ export default function Discover() {
       </View>
       <ChipRow items={CATEGORIES} active={cat} onChange={setCat} testIDPrefix="discover-cat" />
 
+      <ErrorBanner error={error} retry={load} />
+      {notice ? <Text accessibilityLiveRegion="polite" style={{ padding: 16, color: c.success }}>{notice}</Text> : null}
+      {paymentId ? <Button label="Check payment status" loading={registering} onPress={() => performRegistration('')} /> : null}
+      {sport ? <Button label={`Clear ${sport} filter`} variant="secondary" onPress={() => router.setParams({ sport: undefined })} /> : null}
       {loading ? (
         <Loader />
       ) : (
@@ -125,7 +143,7 @@ export default function Discover() {
             <>
               <Text style={styles.sectionH}>What’s Happening</Text>
               {byQ(events).map((e) => (
-                <Pressable key={e.id} style={styles.evCard} testID={`discover-event-${e.id}`}>
+                <Pressable key={e.id} onPress={() => router.push(`/event/${e.id}`)} style={styles.evCard} testID={`discover-event-${e.id}`}>
                   {e.image ? (
                     <Image source={{ uri: e.image }} style={styles.evImg} />
                   ) : (
@@ -156,6 +174,7 @@ export default function Discover() {
                   key={t.id}
                   style={styles.trCard}
                   testID={`discover-tournament-${t.id}`}
+                  disabled={registering || !!paymentId}
                   onPress={() => register(t.id)}
                 >
                   {t.image ? (
@@ -167,7 +186,7 @@ export default function Discover() {
                   )}
                   <LinearGradient colors={['transparent', 'rgba(10,10,11,0.95)']} style={StyleSheet.absoluteFill} />
                   <View style={styles.trOverlay}>
-                    <Text style={styles.trPrize}>₹{t.prize_pool.toLocaleString('en-IN')} prize pool</Text>
+                    <Text style={styles.trPrize}>₹{(t.prize_pool ?? 0).toLocaleString('en-IN')} prize pool</Text>
                     <Text style={styles.trName}>{t.name}</Text>
                     <Text style={styles.trMeta}>{new Date(t.date).toDateString()} · {t.city} · {t.format}</Text>
                     <View style={styles.trFooter}>
@@ -211,7 +230,7 @@ export default function Discover() {
             </>
           )}
 
-          {!byQ(facilities).length && !byQ(events).length && !byQ(tournaments).length && !byQ(coaches).length && (
+          {(!showFac || !byQ(facilities).length) && (!showEv || !byQ(events).length) && (!showTr || !byQ(tournaments).length) && (!showCo || !byQ(coaches).length) && (
             <EmptyState
               title="Nothing matches your search"
               subtitle="Try clearing filters or expanding your area."

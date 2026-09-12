@@ -1,6 +1,7 @@
 // Auth session helper hooks.
 import { useEffect, useState, useCallback } from 'react';
-import { api, getToken, clearToken } from '@/src/api';
+import { subscribeSession } from '@/src/session-events';
+import { api, ApiError, getToken, clearToken } from '@/src/api';
 import type { Capabilities } from '@/src/capabilities';
 import { EMPTY_CAPABILITIES } from '@/src/capabilities';
 
@@ -39,7 +40,9 @@ export function useSession() {
       setCapabilities(caps);
       setLoading(false);
       return u;
-    } catch {
+    } catch (error) {
+      // A temporary network outage must not sign out a valid session.
+      if (!(error instanceof ApiError) || error.status !== 401) { setLoading(false); return null; }
       await clearToken();
       setUser(null);
       setCapabilities(EMPTY_CAPABILITIES);
@@ -48,7 +51,7 @@ export function useSession() {
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { refresh(); return subscribeSession(() => { refresh(); }); }, [refresh]);
 
   return { user, setUser, capabilities, loading, refresh };
 }

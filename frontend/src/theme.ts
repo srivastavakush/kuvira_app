@@ -1,9 +1,9 @@
-// Kuchu Puchu design tokens: Delhi street-sport energy on a clean white base.
+// MatchDrome design tokens: Delhi street-sport energy on a clean white base.
 const palette = {
-  paper: '#FFFDF8', surface: '#FFFFFF', raised: '#F4F3F0', line: '#E6E3DE', lineStrong: '#181818',
-  ink: '#141414', inkSoft: '#55524F', inkMute: '#8C8781', inkFaint: '#B8B3AC',
-  pink: '#FF167F', pinkDark: '#D80065', lime: '#D8FF27', yellow: '#FFD928', blue: '#63D8FF', purple: '#B79AFF',
-  green: '#20A765', amber: '#E89600', red: '#E92B48', info: '#1976D2',
+  paper: '#F8FAFC', surface: '#FFFFFF', raised: '#EEF2F6', line: '#DFE5EC', lineStrong: '#181818',
+  ink: '#081C2B', inkSoft: '#475569', inkMute: '#596779', inkFaint: '#64748B',
+  pink: '#D60068', pinkDark: '#D80065', lime: '#D8FF27', yellow: '#FFD928', blue: '#63D8FF', purple: '#B79AFF',
+  green: '#147A47', amber: '#906000', red: '#E92B48', info: '#1976D2',
 };
 
 export const c = {
