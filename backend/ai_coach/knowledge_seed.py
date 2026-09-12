@@ -1,4 +1,4 @@
-"""Curated, source-attributed starter corpus for Kuchu Puchu AI Coach.
+"""Curated, source-attributed starter corpus for MatchDrome AI Coach.
 
 These are short, original coaching notes distilled from the named official
 sources; they are not scraped or copied rule books. Refreshing this registry
@@ -28,7 +28,7 @@ def seed_documents() -> list[SourceDocument]:
         SourceDocument(
             title="Pickleball: third-shot drop progression", sport="pickleball", topic="transition and soft game",
             category="technical", skill="third-shot drop", situation="after return of serve", source_type="kuvirasports",
-            source_name="Kuchu Puchu coaching playbook", authority_level=3, confidence=0.75,
+            source_name="MatchDrome coaching playbook", authority_level=3, confidence=0.75,
             source_url=None, source_updated_at=None,
             tags=("third shot", "drop", "transition", "common mistake", "beginner"), skill_level="Beginner",
             text="Use a cooperative progression for a third-shot drop: first clear the net with height, then land in the non-volley zone, then add direction. A common mistake is forcing a fast, low ball while off balance. If the ball is below net height or the player is moving, choose a safer reset before advancing.",
@@ -43,7 +43,7 @@ def seed_documents() -> list[SourceDocument]:
         SourceDocument(
             title="Badminton: recover to a neutral base", sport="badminton", topic="movement and court coverage",
             category="movement", skill="footwork", situation="after shot", source_type="kuvirasports",
-            source_name="Kuchu Puchu coaching playbook", authority_level=3, confidence=0.75,
+            source_name="MatchDrome coaching playbook", authority_level=3, confidence=0.75,
             source_url=None,
             tags=("footwork", "recovery", "split step", "common mistake"), skill_level="Beginner",
             text="After each shot, recover toward a neutral base with the racquet up and knees flexed. Do not watch the shuttle from a deep corner; begin recovery as the shot leaves the strings. A practical drill is shadow movement to six corners: split step, move, mime the shot, recover, then repeat for controlled time intervals.",

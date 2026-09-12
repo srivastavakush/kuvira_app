@@ -69,7 +69,7 @@ def _citation(item: KnowledgeItem) -> Dict[str, str]:
     return {
         "id": item.id,
         "title": item.title,
-        "source_name": item.source_name or "Kuchu Puchu coaching library",
+        "source_name": (item.source_name or "MatchDrome coaching library").replace("Kuchu Puchu", "MatchDrome").replace("Kuvira", "MatchDrome"),
         "source_url": item.source_url or "",
         "updated_at": item.source_updated_at or "",
         "verified_at": item.last_verified_at or "",

@@ -27,6 +27,7 @@ export default function Upload() {
   const [level, setLevel] = useState('Intermediate');
   const [notes, setNotes] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [stage, setStage] = useState<string>('');
 
   async function pick() {
@@ -71,11 +72,12 @@ export default function Upload() {
         sport, player_level: level, result, opponent_name: opponent || undefined, notes: `Goal: ${goal.trim()}\n${notes}`,
       });
       setMatchId(match.id);
-      setStage('Uploading video');
+      setStage('Uploading video'); setProgress(null);
       const uploaded: any = videoId ? { id: videoId } : await api.aiCoach.uploadVideo(
         asset.uri, match.id,
         (asset.fileName as any) || 'match.mp4',
         (asset.mimeType as any) || 'video/mp4',
+        setProgress,
       );
       setVideoId(uploaded.id);
       setStage('Starting analysis');
@@ -143,7 +145,7 @@ export default function Upload() {
           testID="upload-notes"
         />
 
-        {uploading ? <Text style={styles.stage}>{stage}…</Text> : null}
+        <Text accessibilityLiveRegion="polite" style={styles.stage}>{uploading ? `${stage}${stage === 'Uploading video' && progress != null ? ` · ${progress}%` : '…'}` : ''}</Text>
       </ScrollView>
 
       <View style={styles.footer}>

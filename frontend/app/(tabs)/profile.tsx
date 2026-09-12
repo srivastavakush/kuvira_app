@@ -21,6 +21,7 @@ export default function Profile() {
   const [orgs, setOrgs] = useState<any[]>([]);
   const [caps, setCaps] = useState<any>(null);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [photoProgress, setPhotoProgress] = useState<number | null>(null);
   const [photoError, setPhotoError] = useState<unknown>();
   const [savingPhoto, setSavingPhoto] = useState(false);
 
@@ -61,9 +62,9 @@ export default function Profile() {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const asset = result.assets[0];
-      setPhotoError(null); setPreviewPhoto(asset.uri);
+      setPhotoError(null); setPhotoProgress(null); setPreviewPhoto(asset.uri);
       setSavingPhoto(true);
-      await api.uploadMyAvatar(asset.uri, asset.fileName || 'profile.jpg', asset.mimeType || 'image/jpeg');
+      await api.uploadMyAvatar(asset.uri, asset.fileName || 'profile.jpg', asset.mimeType || 'image/jpeg', setPhotoProgress);
       await refresh();
     } catch (error: any) {
       setPreviewPhoto(null); setPhotoError('Your photo couldn’t be saved. Tap your photo to choose it again.');
@@ -114,6 +115,7 @@ export default function Profile() {
               {savingPhoto ? <ActivityIndicator size="small" color={c.onAccent} /> : <Ionicons name="camera" size={16} color={c.onAccent} />}
             </View>
           </Pressable>
+          {savingPhoto && <Text accessibilityLiveRegion="polite" style={styles.meta}>Saving photo{photoProgress == null ? '…' : ` · ${photoProgress}%`}</Text>}
           <Text style={styles.name}>{user.name || 'Athlete'}</Text>
           <Text style={styles.meta}>{[user.city, user.skill_level, sportsLabel(user)].filter(Boolean).join(' · ')}</Text>
         </View>
@@ -204,8 +206,9 @@ export default function Profile() {
             {[
               { key: 'training', label: 'Training plans', icon: 'barbell-outline', to: '/training' },
               { key: 'rankings', label: 'Rankings & badges', icon: 'trophy-outline', to: '/rankings' },
-              { key: 'bookings', label: 'My bookings', icon: 'calendar-outline', to: '/(tabs)/play', badge: bookings.length },
-              { key: 'orders', label: 'My orders', icon: 'bag-outline', to: '/marketplace', badge: orders.length },
+              { key: 'bookings', label: 'My bookings', icon: 'calendar-outline', to: '/(tabs)/play?tab=my', badge: bookings.length },
+              { key: 'orders', label: 'My orders', icon: 'bag-outline', to: '/(tabs)/activity', badge: orders.length },
+              { key: 'favourites', label: 'Saved courts on this device', icon: 'heart-outline', to: '/favourites' },
               { key: 'refer', label: 'Refer & earn', icon: 'gift-outline', to: '/refer' },
             ].map((it, i) => (
               <View key={it.key}>

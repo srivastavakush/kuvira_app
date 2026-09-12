@@ -131,12 +131,12 @@ export default function Play() {
                   <Avatar uri={item.avatar} name={item.name} size={52} />
                   <View style={{ flex: 1, marginLeft: spacing.sm }}>
                     <Text style={styles.pName}>{item.name}</Text>
-                    <Text style={styles.pMeta}>{item.skill_level || 'Beginner'} · {item.area || item.city || 'India'}</Text>
+                    <Text style={styles.pMeta}>{item.skill_level || 'Level not listed'} · {item.area || item.city || 'India'}</Text>
                     <Text style={styles.pStats}>
-                      {item.matches_played || 0} matches · {Math.round(((item.wins || 0) / Math.max(1, item.matches_played || 0)) * 100)}% win
+                      {typeof item.matches_played === 'number' ? `${item.matches_played} matches` : 'Match history not listed'}
                     </Text>
                   </View>
-                  <MatchScoreBadge score={item.match_score} testID={`play-player-${item.id}-score`} />
+                  {typeof item.match_score === 'number' && <MatchScoreBadge score={item.match_score} testID={`play-player-${item.id}-score`} />}
                 </Pressable>
               )}
             />

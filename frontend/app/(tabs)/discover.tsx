@@ -21,6 +21,7 @@ const CATEGORIES = [
   { key: 'events', label: 'Events' },
   { key: 'tournaments', label: 'Tournaments' },
   { key: 'coaches', label: 'Coaches' },
+  { key: 'players', label: 'Players' },
 ];
 
 export default function Discover() {
@@ -38,12 +39,13 @@ export default function Discover() {
   const [facilities, setFacilities] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [tournaments, setTournaments] = useState<any[]>([]);
+  const [players, setPlayers] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
 
   async function load() {
     setLoading(true); setError(null);
-    const results = await Promise.allSettled([api.facilities(), api.events(), api.tournaments(), api.coaches()]);
-    const setters = [setFacilities, setEvents, setTournaments, setCoaches];
+    const results = await Promise.allSettled([api.facilities(), api.events(), api.tournaments(), api.coaches(), api.players()]);
+    const setters = [setFacilities, setEvents, setTournaments, setCoaches, setPlayers];
     results.forEach((r, i) => { if (r.status === 'fulfilled' && Array.isArray(r.value)) setters[i](r.value); });
     if (results.some(r => r.status === 'rejected')) setError('Some results couldn’t load. Please try again.');
     setLoading(false);
@@ -54,6 +56,7 @@ export default function Discover() {
   const showEv = cat === 'all' || cat === 'events';
   const showTr = cat === 'all' || cat === 'tournaments';
   const showCo = cat === 'all' || cat === 'coaches';
+  const showPlayers = cat === 'all' || cat === 'players';
 
   async function performRegistration(tournamentId: string) {
     if (registering) return;
@@ -230,7 +233,8 @@ export default function Discover() {
             </>
           )}
 
-          {(!showFac || !byQ(facilities).length) && (!showEv || !byQ(events).length) && (!showTr || !byQ(tournaments).length) && (!showCo || !byQ(coaches).length) && (
+          {showPlayers && byQ(players).map(player => <Pressable key={player.id} accessibilityRole="button" onPress={() => router.push(`/player/${player.id}`)} style={styles.coachCard}><Avatar uri={player.avatar} name={player.name} size={52} /><View style={{ flex: 1, gap: 6 }}><Text style={styles.coachName}>{player.name}</Text><Text style={styles.coachMeta}>{sportsLabel(player)}</Text><Text style={styles.coachMeta}>{[player.skill_level, player.city].filter(Boolean).join(' · ')}</Text></View></Pressable>)}
+          {(!showPlayers || !byQ(players).length) && (!showFac || !byQ(facilities).length) && (!showEv || !byQ(events).length) && (!showTr || !byQ(tournaments).length) && (!showCo || !byQ(coaches).length) && (
             <EmptyState
               title="Nothing matches your search"
               subtitle="Try clearing filters or expanding your area."

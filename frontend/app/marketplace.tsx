@@ -1,6 +1,7 @@
+import { money } from '@/src/sports';
 import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -22,6 +23,8 @@ const CATEGORIES = [
 
 export default function Marketplace() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const columns = width >= 1024 ? 4 : width >= 700 ? 3 : 2;
   const [error, setError] = useState<unknown>();
   const [retry, setRetry] = useState(0);
   const [cat, setCat] = useState('all');
@@ -71,7 +74,8 @@ export default function Marketplace() {
       <FlatList
         data={filtered}
         keyExtractor={(p) => p.id}
-        numColumns={2}
+        key={columns}
+        numColumns={columns}
         columnWrapperStyle={filtered.length ? { gap: spacing.md, paddingHorizontal: spacing.lg } : undefined}
         contentContainerStyle={{ paddingBottom: spacing.xxxl, gap: spacing.md }}
         ListEmptyComponent={
@@ -102,7 +106,7 @@ export default function Marketplace() {
                       </View>
                     )}
                     <Text style={styles.recoName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.recoPrice}>₹{item.price.toLocaleString('en-IN')}</Text>
+                    <Text style={styles.recoPrice}>{money(item.price)}</Text>
                   </Pressable>
                 )}
               />
@@ -122,7 +126,7 @@ export default function Marketplace() {
               <Text style={styles.brand}>{item.category || item.brand || 'Gear'}</Text>
               <Text style={styles.name} numberOfLines={2}>{item.name}</Text>
               <View style={styles.priceRow}>
-                <Text style={styles.price}>₹{item.price.toLocaleString('en-IN')}</Text>
+                <Text style={styles.price}>{money(item.price)}</Text>
                 {item.rating ? (
                   <View style={styles.ratingRow}>
                     <Ionicons name="star" size={11} color={c.textMuted} />

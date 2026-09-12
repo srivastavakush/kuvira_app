@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl, useWindowDimensions, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -30,6 +30,7 @@ export default function Home() {
   const { user } = useSession();
   const { width } = useWindowDimensions();
   const wide = width >= 768;
+  const loadVersion = useRef(0);
   const [data, setData] = useState<Feed>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,7 +40,9 @@ export default function Home() {
   const [cities, setCities] = useState<string[]>([]);
   const [cityError, setCityError] = useState<unknown>();
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     const results = await Promise.allSettled([api.facilities(city ? { city } : {}), api.events(city ? { city } : undefined), api.players(), api.tournaments(city ? { city } : undefined), api.games(city ? { city } : {}), api.products()]);
+    if (version !== loadVersion.current) return;
     const keys = Object.keys(EMPTY) as (keyof Feed)[];
     const failed: string[] = [];
     const updates: Partial<Feed> = {};
@@ -50,7 +53,7 @@ export default function Home() {
     setData(previous => ({ ...previous, ...updates }));
     setErrors(failed); setLoading(false); setRefreshing(false);
   }, [city]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); return () => { loadVersion.current++; }; }, [load]);
   async function openLocation() {
     setLocationOpen(true); setCityError(null);
     try { const list = await api.cities(); setCities((Array.isArray(list) ? list : list?.cities || []).map((x: any) => typeof x === 'string' ? x : x.name || x.city).filter(Boolean)); }
@@ -61,7 +64,7 @@ export default function Home() {
   function Rail({ children }: { children: React.ReactNode }) {
     return wide ? <View style={s.grid}>{children}</View> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rail}>{children}</ScrollView>;
   }
-  function empty(key: keyof Feed, title: string) { return data[key].length ? null : <EmptyState title={errors.includes(key) ? 'Taking a timeout' : title} subtitle={errors.includes(key) ? 'We couldn’t load this section. Please try again.' : 'Explore another area or check back for new activity.'} cta={errors.includes(key) ? 'Try again' : undefined} onCta={load} icon={errors.includes(key) ? 'cloud-offline-outline' : 'tennisball-outline'} />; }
+  function empty(key: keyof Feed, title: string) { return (key === 'players' && city ? data.players.filter(p => p.city === city) : data[key]).length ? null : <EmptyState title={errors.includes(key) ? 'Taking a timeout' : title} subtitle={errors.includes(key) ? 'We couldn’t load this section. Please try again.' : 'Explore another area or check back for new activity.'} cta={errors.includes(key) ? 'Try again' : undefined} onCta={load} icon={errors.includes(key) ? 'cloud-offline-outline' : 'tennisball-outline'} />; }
   const clubs = data.facilities.filter((f, i, all) => f.org_name && all.findIndex(x => x.org_id === f.org_id) === i);
   return <SafeAreaView edges={['top']} style={s.wrap} testID="home-screen">
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.page} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}>
