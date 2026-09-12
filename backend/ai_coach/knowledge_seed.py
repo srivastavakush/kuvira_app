@@ -2,7 +2,7 @@
 
 These are short, original coaching notes distilled from the named official
 sources; they are not scraped or copied rule books. Refreshing this registry
-re-verifies source URLs and replaces only content that has changed.
+re-indexes notes; source verification requires a separate editorial review.
 """
 from __future__ import annotations
 
@@ -96,5 +96,69 @@ def seed_documents() -> list[SourceDocument]:
             source_url="https://www.lords.org/mcc/the-laws", source_updated_at="2022-10-01",
             tags=("laws", "wide", "no ball", "dismissal", "scoring"),
             text="MCC is the custodian of the Laws of Cricket. Use the current Laws for questions on dismissals, scoring, wides, no-balls and player conduct; higher-level matches may also use ICC or tournament playing conditions, which can change how a Law is applied in that competition.",
+        ),
+    ] + reviewed_web_documents()
+
+
+def reviewed_web_documents() -> list[SourceDocument]:
+    """Original summaries checked against the linked primary sources on 2026-09-12.
+
+    Verification dates record review of these notes, not publisher update dates.
+    Keep each note focused so retrieval can answer a concrete coaching question.
+    """
+    reviewed = "2026-09-12"
+    return [
+        SourceDocument(
+            title="Pickleball: two-bounce rule", sport="pickleball", topic="two-bounce rule",
+            category="rules", source_type="rulebook", source_name="USA Pickleball", authority_level=1,
+            source_url="https://usapickleball.org/pickleball-skills/level-one/how-to-play-pickleball/",
+            last_verified_at=reviewed, tags=("serve", "return", "bounce", "volley"),
+            text="The receiver must let the serve bounce before returning it. The serving team must then let that return bounce before hitting it. Only after these two bounces may either team volley, subject to the non-volley-zone restrictions. This is different from allowing a ball to bounce twice before hitting it, which is a fault.",
+        ),
+        SourceDocument(
+            title="Pickleball: service targets and kitchen line", sport="pickleball", topic="service placement",
+            category="rules", skill="serve", source_type="rulebook", source_name="USA Pickleball", authority_level=1,
+            source_url="https://usapickleball.org/pickleball-skills/level-one/how-to-play-pickleball/",
+            last_verified_at=reviewed, tags=("serve", "diagonal", "kitchen line", "fault"),
+            text="Aim a serve into the diagonally opposite service box beyond the kitchen. A serve landing in the kitchen or on its line is a fault. Distinguish this service restriction from rally play: a player may enter the kitchen to hit a ball that has bounced, but cannot volley there or be carried there by volley momentum.",
+        ),
+        SourceDocument(
+            title="Pickleball: balanced transition to the kitchen", sport="pickleball", topic="transition positioning",
+            category="movement", skill="footwork", skill_level="Beginner", source_type="coaching",
+            source_name="USA Pickleball", authority_level=2,
+            source_url="https://usapickleball.org/pickleball-skills/level-two/pickleball-basics-positioning-tips/",
+            source_updated_at="2025-09-21", last_verified_at=reviewed,
+            tags=("split step", "partner", "paddle", "ready position", "transition", "third shot"),
+            text="After serving, stay back to allow the return to bounce, then work forward after the third shot. Keep the paddle up, knees bent and backswing short. As you advance, follow the ball's direction, reset your balance with a split step before the opponent hits, and move with your partner to avoid leaving a gap. Avoid lingering between the baseline and kitchen line where opponents can target your feet.",
+        ),
+        SourceDocument(
+            title="Tennis: intermediate volley depth control", sport="tennis", topic="volley placement",
+            category="technical", skill="volley", skill_level="Intermediate", source_type="coaching",
+            source_name="USTA", authority_level=2,
+            source_url="https://www.usta.com/en/home/improve/tips-and-instruction/national/learning-the-basics--volleys.html",
+            source_updated_at="2017-01-01", last_verified_at=reviewed,
+            tags=("volley", "depth", "direction", "net", "step", "grip"),
+            text="Once a compact volley is dependable, practise directing it left or right and varying its depth. Step into contact and experiment with step size and grip pressure: a stronger step and firmer squeeze send the ball farther. Keep the action controlled rather than adding a large swing. Develop placement as well as contact consistency.",
+        ),
+        SourceDocument(
+            title="Football: offside position and active involvement", sport="football", topic="offside",
+            category="rules", source_type="rulebook", source_name="The IFAB", authority_level=1,
+            source_url="https://www.theifab.com/laws/latest/offside/", last_verified_at=reviewed,
+            tags=("offside", "opponent", "goal kick", "throw-in", "corner", "interference"),
+            text="Being in an offside position is not by itself an offence. A player in that position when a teammate plays or touches the ball is penalised for active involvement, such as playing the ball, interfering with an opponent or gaining an advantage from a rebound or save. There is no offside offence when receiving directly from a goal kick, throw-in or corner kick. Check Law 11 for the full position and involvement tests.",
+        ),
+        SourceDocument(
+            title="Cricket: caught dismissal and control", sport="cricket", topic="caught dismissal",
+            category="rules", source_type="rulebook", source_name="Marylebone Cricket Club", authority_level=1,
+            source_url="https://www.lords.org/mcc/the-laws/caught", last_verified_at=reviewed,
+            tags=("caught", "catch", "control", "boundary", "dismissal"),
+            text="A caught dismissal requires a delivery that is not a no-ball, contact with the bat before any fielder contact, and a fair catch before the ball reaches the ground. Completing the catch requires control of both the ball and the fielder's movement. Boundary catches have additional conditions under Law 33 and the boundary Laws; taking the ball in the hands alone does not establish that every requirement is satisfied.",
+        ),
+        SourceDocument(
+            title="Cricket: no-ball consequences", sport="cricket", topic="no-ball",
+            category="rules", source_type="rulebook", source_name="Marylebone Cricket Club", authority_level=1,
+            source_url="https://www.lords.org/mcc/the-laws/no-ball", last_verified_at=reviewed,
+            tags=("no-ball", "no ball", "extra", "over", "run out", "dismissal"),
+            text="Under MCC Law 21, a no-ball adds a one-run penalty and does not count as a ball in the over. The call does not itself make the ball dead and overrides a wide. A batter cannot be dismissed caught from a no-ball; the permitted dismissals are hit the ball twice, obstructing the field and run out. Check the competition's playing conditions for any additional provisions.",
         ),
     ]
