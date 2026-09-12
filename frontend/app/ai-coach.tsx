@@ -7,6 +7,7 @@ import { c, spacing, font, radius } from '@/src/theme';
 import { ScreenHeader, Button, EmptyState, Divider, Badge } from '@/src/components/ui';
 import { api } from '@/src/api';
 import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
 
 export default function AICoachHub() {
   const router = useRouter();
@@ -31,11 +32,12 @@ export default function AICoachHub() {
 
   const latest = matches[0];
   const level = user?.skill_level || null;
+  const upload = () => { if (requireAuth(user, router, '/ai-coach/upload')) router.push('/ai-coach/upload'); };
 
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="ai-coach-hub">
       <ScreenHeader
-        title="Coach"
+        title="Kuchu Puchu AI Coach"
         onBack={() => router.back()}
         right={level ? <Badge label={level} variant="neutral" size="sm" /> : undefined}
       />
@@ -46,11 +48,11 @@ export default function AICoachHub() {
       >
         {/* Primary CTA */}
         <View style={styles.primary}>
-          <Text style={styles.primaryEyebrow}>Analyze</Text>
-          <Text style={styles.primaryTitle}>Turn a match video into a coaching report.</Text>
+          <Text style={styles.primaryEyebrow}>★ YOUR GAME, LEVELLED UP</Text>
+          <Text style={styles.primaryTitle}>Turn a match video into your next big move.</Text>
           <Text style={styles.primarySub}>Upload footage of your match. We’ll produce structured, evidence-based analysis you can train against.</Text>
           <View style={{ marginTop: spacing.lg }}>
-            <Button label="Analyze a match" onPress={() => router.push('/ai-coach/upload')} testID="ai-coach-analyze" />
+            <Button label="Analyze a match" onPress={upload} testID="ai-coach-analyze" />
           </View>
         </View>
 
@@ -96,7 +98,7 @@ export default function AICoachHub() {
             subtitle="Upload your first match video to see structured coaching."
             icon="videocam-outline"
             cta="Upload a match"
-            onCta={() => router.push('/ai-coach/upload')}
+            onCta={upload}
             testID="ai-coach-empty"
           />
         ) : (
@@ -145,10 +147,10 @@ function MenuRow({ icon, label, sub, onPress }: { icon: any; label: string; sub?
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: c.bg },
-  primary: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
-  primaryEyebrow: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: font.weights.semibold, marginBottom: 6 },
-  primaryTitle: { color: c.text, fontSize: font.sizes.xxl, fontWeight: font.weights.heavy, letterSpacing: -0.3, lineHeight: 30 },
-  primarySub: { color: c.textMuted, fontSize: font.sizes.base, lineHeight: 22, marginTop: spacing.sm },
+  primary: { margin: spacing.lg, padding: spacing.xl, backgroundColor: c.text, borderRadius: radius.lg },
+  primaryEyebrow: { color: c.lime, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: font.weights.black, marginBottom: 8 },
+  primaryTitle: { color: '#FFFFFF', fontSize: font.sizes.xxl, fontWeight: font.weights.black, letterSpacing: -0.5, lineHeight: 30 },
+  primarySub: { color: '#E6E3DE', fontSize: font.sizes.base, lineHeight: 22, marginTop: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginHorizontal: spacing.lg, marginBottom: spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.md, backgroundColor: c.bgElevated, borderRadius: radius.md },
   rowIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: c.bgRaised, alignItems: 'center', justifyContent: 'center' },
   rowLabel: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1, fontWeight: font.weights.semibold },

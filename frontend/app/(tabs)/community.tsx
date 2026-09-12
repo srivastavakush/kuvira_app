@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { c, spacing, font, radius } from '@/src/theme';
-import { Loader, EmptyState, Divider } from '@/src/components/ui';
+import { Loader, EmptyState, Divider, Avatar } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 export default function Community() {
@@ -13,9 +13,15 @@ export default function Community() {
   const [refreshing, setRefreshing] = useState(false);
   const [text, setText] = useState('');
   const [posting, setPosting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try { setPosts(await api.posts()); } finally { setLoading(false); }
+    try {
+      setLoadError(null);
+      setPosts(await api.posts());
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not load the community right now.');
+    } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -58,6 +64,14 @@ export default function Community() {
         </View>
         {loading ? (
           <Loader />
+        ) : loadError ? (
+          <EmptyState
+            title="Community is taking a timeout"
+            subtitle={loadError}
+            icon="cloud-offline-outline"
+            cta="Try again"
+            onCta={() => { setLoading(true); load(); }}
+          />
         ) : (
           <FlatList
             data={posts}
@@ -69,9 +83,9 @@ export default function Community() {
             renderItem={({ item }) => (
               <View style={styles.postCard} testID={`community-post-${item.id}`}>
                 <View style={styles.postHeader}>
-                  <Image source={{ uri: item.author?.avatar }} style={styles.pAvatar} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.pName}>{item.author?.name}</Text>
+                  <Avatar uri={item.author?.avatar} name={item.author?.name} size={36} />
+                  <View style={{ flex: 1, marginLeft: spacing.sm }}>
+                    <Text style={styles.pName}>{item.author?.name || 'Player'}</Text>
                     <Text style={styles.pTime}>{new Date(item.created_at).toLocaleDateString()}</Text>
                   </View>
                 </View>

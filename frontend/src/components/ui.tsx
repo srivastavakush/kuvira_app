@@ -1,4 +1,4 @@
-// Kuvira — shared UI primitives.
+// Kuchu Puchu — shared UI primitives.
 // Design principles:
 //   • gold is an accent, not decoration
 //   • quiet surfaces, clear hierarchy, generous spacing
@@ -881,6 +881,70 @@ export function EmptyState({
   );
 }
 
+// =========================================================================
+// Avatar — real user photo or clean initials / vector icon
+// =========================================================================
+export function Avatar({
+  uri,
+  name,
+  size = 44,
+  style,
+  testID,
+}: {
+  uri?: string | null;
+  name?: string | null;
+  size?: number;
+  style?: any;
+  testID?: string;
+}) {
+  const radiusVal = size / 2;
+  const getInitials = (n?: string | null) => {
+    if (!n) return '';
+    const parts = n.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+  const inits = getInitials(name);
+
+  if (uri && typeof uri === 'string' && uri.trim() && !uri.includes('pravatar.cc')) {
+    return (
+      <Image
+        source={{ uri }}
+        style={[{ width: size, height: size, borderRadius: radiusVal, backgroundColor: c.bgRaised }, style]}
+        contentFit="cover"
+        testID={testID}
+      />
+    );
+  }
+
+  return (
+    <View
+      testID={testID}
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: radiusVal,
+          backgroundColor: c.bgElevated,
+          borderWidth: 1,
+          borderColor: c.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        style,
+      ]}
+    >
+      {inits ? (
+        <Text style={{ color: c.text, fontSize: Math.max(11, Math.floor(size * 0.38)), fontWeight: '800' }}>
+          {inits}
+        </Text>
+      ) : (
+        <Ionicons name="person" size={Math.floor(size * 0.52)} color={c.textMuted} />
+      )}
+    </View>
+  );
+}
+
 const emptyStyles = StyleSheet.create({
   wrap: {
     padding: spacing.xxl,
@@ -1046,7 +1110,7 @@ export function HeroImage({
       <LinearGradient
         colors={['transparent', 'rgba(10,10,11,0.35)', 'rgba(10,10,11,0.95)']}
         locations={[0, 0.55, 1]}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
       <View
         style={{

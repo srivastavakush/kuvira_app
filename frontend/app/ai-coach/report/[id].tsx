@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,6 +31,7 @@ export default function Report() {
   const dq = report.data_quality || {};
   const metrics: any[] = report.metrics || [];
   const evidence: any[] = report.evidence || [];
+  const sources: any[] = report.sources || [];
   const unavailable: string[] = report.unavailable || [];
 
   return (
@@ -135,6 +136,22 @@ export default function Report() {
           </View>
         ) : null}
 
+        {sources.length ? (
+          <View style={styles.section} testID="ai-coach-report-sources">
+            <Text style={styles.sectionLabel}>Coaching sources</Text>
+            {sources.map((source: any, index: number) => (
+              <Pressable key={`${source.id || source.source_url}-${index}`} onPress={() => source.source_url ? Linking.openURL(source.source_url) : undefined} disabled={!source.source_url} style={styles.sourceRow}>
+                <Ionicons name="link-outline" size={16} color={c.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sourceTitle}>{source.title || source.source_name || 'Coaching source'}</Text>
+                  <Text style={styles.sourceMeta}>{source.source_name || 'Source'}{source.updated_at ? ` â€¢ updated ${source.updated_at.slice(0, 10)}` : ''}</Text>
+                </View>
+                {source.source_url ? <Ionicons name="open-outline" size={15} color={c.textFaint} /> : null}
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
         {/* Not available */}
         {unavailable.length ? (
           <View style={styles.section}>
@@ -211,4 +228,7 @@ const styles = StyleSheet.create({
   evTitle: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
   evBody: { color: c.textSecondary, fontSize: font.sizes.sm, marginTop: 4, lineHeight: 20 },
   evMeta: { color: c.textFaint, fontSize: font.sizes.xs, marginTop: 4 },
+  sourceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.divider },
+  sourceTitle: { color: c.accent, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
+  sourceMeta: { color: c.textFaint, fontSize: font.sizes.xs, marginTop: 2 },
 });

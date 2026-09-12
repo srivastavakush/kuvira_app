@@ -8,23 +8,7 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: c.text,
-        tabBarInactiveTintColor: c.textFaint,
-        tabBarStyle: {
-          backgroundColor: c.bg,
-          borderTopColor: c.divider,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          height: 68,
-          paddingTop: 8,
-          paddingBottom: 12,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: font.weights.semibold,
-          letterSpacing: 0.2,
-          marginTop: 2,
-        },
-        tabBarItemStyle: { paddingVertical: 2 },
+        tabBarStyle: { display: 'none' },
         sceneStyle: { backgroundColor: c.bg },
       }}
     >

@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { c, spacing, font, radius } from '@/src/theme';
-import { ChipRow, Loader, EmptyState, MatchScoreBadge, Badge } from '@/src/components/ui';
+import { ChipRow, Loader, EmptyState, MatchScoreBadge, Badge, Avatar } from '@/src/components/ui';
 import { api } from '@/src/api';
 import { useSession } from '@/src/session';
 import { requireAuth } from '@/src/auth-gate';
@@ -48,7 +48,7 @@ export default function Play() {
   useEffect(() => { setLoading(true); load(); }, [load]);
 
   async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
-  function createGame() { if (requireAuth(user, router)) router.push('/create-game'); }
+  function createGame() { if (requireAuth(user, router, '/create-game')) router.push('/create-game'); }
 
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="play-screen">
@@ -126,12 +126,12 @@ export default function Play() {
                   style={({ pressed }) => [styles.playerCard, pressed && { backgroundColor: c.bgRaised }]}
                   onPress={() => router.push(`/player/${item.id}`)}
                 >
-                  <Image source={{ uri: item.avatar }} style={styles.pAvatar} />
-                  <View style={{ flex: 1 }}>
+                  <Avatar uri={item.avatar} name={item.name} size={52} />
+                  <View style={{ flex: 1, marginLeft: spacing.sm }}>
                     <Text style={styles.pName}>{item.name}</Text>
-                    <Text style={styles.pMeta}>{item.skill_level} · {item.area}</Text>
+                    <Text style={styles.pMeta}>{item.skill_level || 'Beginner'} · {item.area || item.city || 'India'}</Text>
                     <Text style={styles.pStats}>
-                      {item.matches_played} matches · {Math.round((item.wins / Math.max(1, item.matches_played)) * 100)}% win
+                      {item.matches_played || 0} matches · {Math.round(((item.wins || 0) / Math.max(1, item.matches_played || 0)) * 100)}% win
                     </Text>
                   </View>
                   <MatchScoreBadge score={item.match_score} testID={`play-player-${item.id}-score`} />

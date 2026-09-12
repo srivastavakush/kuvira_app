@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { c, spacing, font, radius } from '@/src/theme';
 import { Loader, ScreenHeader, Button, SuccessMark } from '@/src/components/ui';
-import { api } from '@/src/api';
+import { api, apiBaseUrl } from '@/src/api';
 
 function nextDates(n: number) {
   const out = [];
@@ -23,6 +24,8 @@ export default function Booking() {
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [booking, setBooking] = useState(false);
   const [confirmed, setConfirmed] = useState<any>(null);
+  const [email, setEmail] = useState('');
+  const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
 
   const dateStr = dates[dateIdx].toISOString().slice(0, 10);
 
@@ -38,9 +41,16 @@ export default function Booking() {
     if (!selectedSlot) return;
     setBooking(true);
     try {
-      const res = await api.createBooking({ facility_id: facilityId, court_number: court, date: dateStr, slot: selectedSlot, duration_min: 60 });
-      setConfirmed(res);
-    } finally { setBooking(false); }
+      setPaymentMessage(null);
+      const res: any = await api.createBooking({ facility_id: facilityId, court_number: court, date: dateStr, slot: selectedSlot, duration_min: 60, customer_email: email.trim() || undefined });
+      if (res.checkout_url && res.payment?.id) {
+        await WebBrowser.openBrowserAsync(`${apiBaseUrl}${res.checkout_url}`);
+        const status: any = await api.paymentStatus(res.payment.id);
+        if (status.payment?.status === 'succeeded' && status.resource) setConfirmed(status.resource);
+        else setPaymentMessage('Payment is awaiting PayU verification. Pull to refresh My Bookings in a moment.');
+      } else setConfirmed(res);
+    } catch (error) { setPaymentMessage(error instanceof Error ? error.message : 'Could not start payment.'); }
+    finally { setBooking(false); }
   }
 
   if (!facility || !avail) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}><Loader /></SafeAreaView>;
@@ -71,6 +81,9 @@ export default function Booking() {
       <ScreenHeader title={facility.name} onBack={() => router.back()} testID="booking" />
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }}>
+        <Text style={styles.label}>Payment email</Text>
+        <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="you@example.com" placeholderTextColor={c.textFaint} style={styles.emailInput} />
+        {paymentMessage ? <Text style={styles.paymentMessage}>{paymentMessage}</Text> : null}
         <Text style={styles.label}>Date</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
           {dates.map((d, i) => (
@@ -157,6 +170,8 @@ function Row({ label, value }: { label: string; value: string }) {
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: c.bg },
   label: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: font.weights.semibold, marginTop: spacing.xl, marginBottom: spacing.md },
+  emailInput: { backgroundColor: c.bgElevated, color: c.text, minHeight: 48, borderRadius: radius.md, paddingHorizontal: spacing.md, fontSize: font.sizes.base },
+  paymentMessage: { color: c.danger, fontSize: font.sizes.sm, marginTop: spacing.sm },
   dateCard: { width: 56, height: 68, borderRadius: radius.md, backgroundColor: c.bgElevated, alignItems: 'center', justifyContent: 'center' },
   dateCardActive: { backgroundColor: c.text },
   dateDow: { color: c.textMuted, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 0.5 },

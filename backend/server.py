@@ -1,4 +1,4 @@
-"""Kuvira Sports — backend API.
+"""Kuchu Puchu — backend API.
 
 MVP scope:
 - Mobile+OTP auth (mock: any number, OTP=123456), JWT
@@ -10,8 +10,11 @@ MVP scope:
 - Seeder for demo data
 """
 import os
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
-from fastapi.responses import JSONResponse
+import html
+import asyncio
+from io import BytesIO
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, File, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -21,22 +24,24 @@ from pymongo.errors import DuplicateKeyError
 
 from seed_data import (
     SPORTS, SKILL_LEVELS, FACILITIES, PLAYERS, COACHES,
-    EVENTS, TOURNAMENTS, GAMES, PRODUCTS, COMMUNITY_POSTS,
+    EVENTS, TOURNAMENTS, GAMES, PRODUCTS, COMMUNITY_POSTS, INDIA_CITIES,
 )
 from deps import (
     db, client, gen_id, utcnow, strip_id, make_token, current_user, optional_user,
     current_capabilities, _load_capabilities, KuviraError, log, configure_logging,
-    request_id_ctx, EMERGENT_LLM_KEY, CORS_ALLOWED_ORIGINS, APP_ENV, IS_PROD,
+    request_id_ctx, EMERGENT_LLM_KEY, CORS_ALLOWED_ORIGINS, APP_ENV, IS_PROD, PAYMENT_PROVIDER, validate_runtime_config,
 )
 import otp_service
 import features
 import org_admin
+from payments import PayU, checkout_html, create_checkout, process_callback
+from profile_media import ProfileMediaStorage
 
 PLATFORM_ADMIN_MOBILES = [m.strip() for m in os.environ.get("PLATFORM_ADMIN_MOBILES", "").split(",") if m.strip()]
 
 configure_logging()
 
-app = FastAPI(title="Kuvira Sports API")
+app = FastAPI(title="Kuchu Puchu API")
 api = APIRouter(prefix="/api")
 
 # ---------------------------------------------------------------------------
@@ -86,6 +91,7 @@ class BookingCreate(BaseModel):
     date: str  # ISO date
     slot: str  # "18:00-19:00"
     duration_min: int = 60
+    customer_email: Optional[str] = None
 
 class GameCreate(BaseModel):
     sport: str = "sport-pickleball"
@@ -108,6 +114,10 @@ class CartAdd(BaseModel):
 
 class OrderCreate(BaseModel):
     address: Dict[str, str]
+    customer_email: Optional[str] = None
+
+class PaymentContact(BaseModel):
+    customer_email: Optional[str] = None
 
 class ChatMessage(BaseModel):
     text: str
@@ -118,29 +128,15 @@ class ChatMessage(BaseModel):
 # ---------------------------------------------------------------------------
 
 async def seed_if_empty():
+    """Ensure core reference catalog (sports) is present. No fake demo data is ever seeded."""
     if await db.sports.count_documents({}) == 0:
         await db.sports.insert_many([s.copy() for s in SPORTS])
-    if await db.facilities.count_documents({}) == 0:
-        await db.facilities.insert_many([f.copy() for f in FACILITIES])
-    if await db.players.count_documents({}) == 0:
-        await db.players.insert_many([p.copy() for p in PLAYERS])
-    if await db.coaches.count_documents({}) == 0:
-        await db.coaches.insert_many([c.copy() for c in COACHES])
-    if await db.events.count_documents({}) == 0:
-        await db.events.insert_many([e.copy() for e in EVENTS])
-    if await db.tournaments.count_documents({}) == 0:
-        await db.tournaments.insert_many([t.copy() for t in TOURNAMENTS])
-    if await db.games.count_documents({}) == 0:
-        await db.games.insert_many([g.copy() for g in GAMES])
-    if await db.products.count_documents({}) == 0:
-        await db.products.insert_many([p.copy() for p in PRODUCTS])
-    if await db.posts.count_documents({}) == 0:
-        await db.posts.insert_many([p.copy() for p in COMMUNITY_POSTS])
-    log.info("Seed complete.")
+        log.info("Sports catalog initialized.")
 
 async def ensure_indexes():
     await db.users.create_index("mobile", unique=True)
     await db.users.create_index("referral_code", sparse=True)
+    await db.users.create_index([("location", "2dsphere")], sparse=True)
     # Concurrency-safe booking: one confirmed booking per court/date/slot
     await db.bookings.create_index(
         [("facility_id", 1), ("court_number", 1), ("date", 1), ("slot", 1)],
@@ -155,16 +151,26 @@ async def ensure_indexes():
     await db.organization_memberships.create_index("org_id")
     await db.facilities.create_index("org_id", sparse=True)
     await db.facilities.create_index("city")
+    await db.facilities.create_index([("location", "2dsphere")], sparse=True)
     await db.games.create_index("facility_id")
     await db.orders.create_index("user_id")
+    await db.payment_transactions.create_index("txnid", unique=True)
+    await db.payment_transactions.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
     await db.posts.create_index("created_at")
     await db.training_plans.create_index("user_id")
     await db.training_activity.create_index([("user_id", 1), ("day", 1)], unique=True)
+    await db.events.create_index([("location", "2dsphere")], sparse=True)
+    await db.events.create_index("status")
+    await db.tournaments.create_index([("location", "2dsphere")], sparse=True)
+    await db.tournaments.create_index("status")
+    await db.audit_logs.create_index("org_id")
+    await db.audit_logs.create_index("created_at")
     log.info("Indexes ensured.")
 
 
 @app.on_event("startup")
 async def _startup():
+    validate_runtime_config()
     await ensure_indexes()
     if not IS_PROD:
         await seed_if_empty()
@@ -222,7 +228,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @api.get("/")
 async def root():
-    return {"app": "Kuvira Sports", "status": "ok", "env": APP_ENV}
+    return {"app": "Kuchu Puchu", "status": "ok", "env": APP_ENV}
 
 @api.get("/health")
 async def health():
@@ -292,6 +298,54 @@ async def onboarding(body: OnboardingPayload, user=Depends(current_user)):
     fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     return fresh
 
+def _avatar_url(request: Request, user_id: str, asset_id: str) -> str:
+    base = os.environ.get("PROFILE_MEDIA_PUBLIC_BASE_URL", "").strip().rstrip("/") or str(request.base_url).rstrip("/")
+    return f"{base}/api/users/{user_id}/avatar?v={asset_id}"
+
+
+@api.post("/users/me/avatar")
+async def upload_my_avatar(request: Request, file: UploadFile = File(...), user=Depends(current_user)):
+    """Replace the signed-in user's profile photo with a validated image."""
+    try:
+        storage = ProfileMediaStorage()
+        reference = await asyncio.to_thread(storage.put, file.file, user["id"])
+    except ValueError as exc:
+        raise KuviraError(400, "INVALID_AVATAR", str(exc))
+    except Exception:
+        log.exception("profile avatar upload failed")
+        raise KuviraError(503, "AVATAR_UPLOAD_UNAVAILABLE", "Could not save your profile photo. Try again.")
+    finally:
+        await file.close()
+
+    previous = user.get("avatar_storage")
+    avatar = _avatar_url(request, user["id"], reference["asset_id"])
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"avatar": avatar, "avatar_storage": reference, "avatar_updated_at": utcnow().isoformat()}},
+    )
+    try:
+        await asyncio.to_thread(storage.delete, previous)
+    except Exception:
+        log.warning("old profile avatar could not be removed", extra={"user_id": user["id"]})
+    return {"avatar": avatar}
+
+
+@api.get("/users/{user_id}/avatar")
+async def get_user_avatar(user_id: str):
+    """Serve public profile photos without making the backing object bucket public."""
+    record = await db.users.find_one({"id": user_id}, {"_id": 0, "avatar_storage": 1})
+    reference = (record or {}).get("avatar_storage")
+    if not reference:
+        raise KuviraError(404, "AVATAR_NOT_FOUND", "Profile photo not found")
+    try:
+        content = await asyncio.to_thread(ProfileMediaStorage().read, reference)
+    except FileNotFoundError:
+        raise KuviraError(404, "AVATAR_NOT_FOUND", "Profile photo not found")
+    except Exception:
+        log.exception("profile avatar read failed")
+        raise KuviraError(503, "AVATAR_UNAVAILABLE", "Profile photo is temporarily unavailable")
+    return StreamingResponse(BytesIO(content), media_type=reference.get("content_type", "image/jpeg"), headers={"Cache-Control": "public, max-age=86400"})
+
 # ---------------------------------------------------------------------------
 # Sports / catalog
 # ---------------------------------------------------------------------------
@@ -306,12 +360,74 @@ async def list_skills():
     return SKILL_LEVELS
 
 # ---------------------------------------------------------------------------
+# Location & Nearby
+# ---------------------------------------------------------------------------
+
+class LocationUpdate(BaseModel):
+    lat: float
+    lng: float
+    city: Optional[str] = None
+    state: Optional[str] = None
+    area: Optional[str] = None
+
+@api.get("/cities")
+async def list_cities():
+    """Return the full India cities list for manual city selection."""
+    return {"cities": INDIA_CITIES}
+
+@api.post("/users/me/location")
+async def update_my_location(body: LocationUpdate, user=Depends(current_user)):
+    """Store the user's last known location (one-shot, no background tracking)."""
+    update = {
+        "location": {"type": "Point", "coordinates": [body.lng, body.lat]},
+        "lat": body.lat, "lng": body.lng,
+        "location_updated_at": utcnow().isoformat(),
+    }
+    if body.city: update["city"] = body.city
+    if body.state: update["state"] = body.state
+    if body.area: update["area"] = body.area
+    await db.users.update_one({"id": user["id"]}, {"$set": update})
+    return {"updated": True}
+
+@api.get("/facilities/nearby")
+async def facilities_nearby(
+    lat: float, lng: float, radius_km: float = 25,
+    sport: Optional[str] = None
+):
+    """Find active facilities within radius_km using MongoDB 2dsphere geospatial query."""
+    radius_meters = radius_km * 1000
+    q: Dict[str, Any] = {
+        "location": {
+            "$near": {
+                "$geometry": {"type": "Point", "coordinates": [lng, lat]},
+                "$maxDistance": radius_meters,
+            }
+        },
+        "status": {"$ne": "inactive"}, "is_demo": {"$ne": True},
+        "org_status": {"$ne": "inactive"},
+    }
+    if sport: q["sports"] = sport
+    facilities = await db.facilities.find(q, {"_id": 0}).to_list(50)
+    # Attach distance_km
+    for f in facilities:
+        flat, flng = f.get("lat"), f.get("lng")
+        if flat and flng:
+            # Haversine distance (no external Maps API needed)
+            import math
+            R = 6371
+            dlat = math.radians(flat - lat)
+            dlng = math.radians(flng - lng)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat)) * math.cos(math.radians(flat)) * math.sin(dlng/2)**2
+            f["distance_km"] = round(R * 2 * math.asin(math.sqrt(a)), 1)
+    return facilities
+
+# ---------------------------------------------------------------------------
 # Facilities & courts
 # ---------------------------------------------------------------------------
 
 @api.get("/facilities")
 async def list_facilities(city: Optional[str] = None, sport: Optional[str] = None):
-    q: Dict[str, Any] = {}
+    q: Dict[str, Any] = {"is_demo": {"$ne": True}, "status": {"$ne": "inactive"}}
     if city:
         q["city"] = city
     if sport:
@@ -321,35 +437,66 @@ async def list_facilities(city: Optional[str] = None, sport: Optional[str] = Non
 
 @api.get("/facilities/{fid}")
 async def get_facility(fid: str):
-    f = await db.facilities.find_one({"id": fid}, {"_id": 0})
+    f = await db.facilities.find_one({"id": fid, "is_demo": {"$ne": True}, "status": {"$ne": "inactive"}}, {"_id": 0})
     if not f:
         raise HTTPException(404, "Facility not found")
     return f
 
 @api.get("/facilities/{fid}/availability")
 async def facility_availability(fid: str, date: str):
-    """Return time slots with availability for a court on a given date (mocked)."""
-    f = await db.facilities.find_one({"id": fid}, {"_id": 0})
+    """Return time slots with availability for a court on a given date.
+
+    Availability is computed from three sources (in priority order):
+      1. Slot overrides set by Manager/Admin via /orgs/{id}/facilities/{id}/slots
+         - status=blocked => unavailable regardless of bookings
+         - status=open    => available (explicit override)
+      2. Existing confirmed bookings (a booked slot is unavailable)
+      3. Default: all slots in operating hours (06:00-23:00) are available
+    """
+    f = await db.facilities.find_one({"id": fid, "is_demo": {"$ne": True}, "status": {"$ne": "inactive"}}, {"_id": 0})
     if not f:
         raise HTTPException(404, "Facility not found")
     slots = [f"{h:02d}:00-{h+1:02d}:00" for h in range(6, 23)]
-    # Find already booked
-    booked = await db.bookings.find({"facility_id": fid, "date": date}, {"_id": 0}).to_list(200)
+
+    # Confirmed bookings (cancelled bookings free the slot)
+    booked = await db.bookings.find(
+        {"facility_id": fid, "date": date, "status": {"$ne": "cancelled"}}, {"_id": 0}
+    ).to_list(200)
     booked_set = {(b["court_number"], b["slot"]) for b in booked}
+
+    # Slot overrides created by Manager/Admin (block or explicit open)
+    overrides_raw = await db.facility_slots.find(
+        {"facility_id": fid, "date": date}, {"_id": 0}
+    ).to_list(500)
+    # Map (court_number, slot) -> status
+    slot_overrides: dict = {
+        (o["court_number"], o["slot"]): o["status"] for o in overrides_raw
+    }
+
     courts = []
     for court_num in range(1, f["courts_count"] + 1):
         court_slots = []
         for s in slots:
-            court_slots.append({
-                "slot": s,
-                "available": (court_num, s) not in booked_set,
-                "price": f["price_per_hour"],
-            })
+            key = (court_num, s)
+            override = slot_overrides.get(key)
+            if override == "blocked":
+                available = False
+                reason = "blocked"
+            elif key in booked_set:
+                available = False
+                reason = "booked"
+            else:
+                available = True
+                reason = None
+            entry = {"slot": s, "available": available, "price": f["price_per_hour"]}
+            if reason:
+                entry["reason"] = reason
+            court_slots.append(entry)
         courts.append({"court_number": court_num, "slots": court_slots})
     return {"facility_id": fid, "date": date, "courts": courts}
 
 # ---------------------------------------------------------------------------
-# Bookings (mock payment)
+# Bookings / payments
 # ---------------------------------------------------------------------------
 
 @api.post("/bookings")
@@ -359,20 +506,32 @@ async def create_booking(body: BookingCreate, user=Depends(current_user)):
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
     if body.court_number < 1 or body.court_number > f.get("courts_count", 1):
         raise KuviraError(400, "INVALID_COURT", "Invalid court number")
+
+    # Reject if slot is explicitly blocked by a Manager/Admin override
+    slot_override = await db.facility_slots.find_one({
+        "facility_id": body.facility_id,
+        "court_number": body.court_number,
+        "date": body.date,
+        "slot": body.slot,
+        "status": "blocked",
+    })
+    if slot_override:
+        raise KuviraError(409, "SLOT_BLOCKED", "This slot has been blocked by the facility manager.")
+
     price = f["price_per_hour"]  # server-side price; client value is never trusted
     booking = {
         "id": gen_id(),
         "user_id": user["id"],
         "facility_id": body.facility_id,
         "facility_name": f["name"],
-        "facility_image": f["image"],
+        "facility_image": f.get("image", ""),
         "court_number": body.court_number,
         "date": body.date,
         "slot": body.slot,
         "duration_min": body.duration_min,
         "price": price,
-        "status": "confirmed",
-        "payment": {"provider": "mock_payu", "status": "paid", "amount": price},
+        "status": "pending_payment" if PAYMENT_PROVIDER == "payu" else "confirmed",
+        "payment": {"provider": "payu", "status": "initiated", "amount": price} if PAYMENT_PROVIDER == "payu" else {"provider": "mock_payu", "status": "paid", "amount": price},
         "created_at": utcnow().isoformat(),
     }
     try:
@@ -380,12 +539,62 @@ async def create_booking(body: BookingCreate, user=Depends(current_user)):
         await db.bookings.insert_one(booking.copy())
     except DuplicateKeyError:
         raise KuviraError(409, "BOOKING_SLOT_UNAVAILABLE", "This slot is no longer available.")
-    return strip_id(booking)
+    if PAYMENT_PROVIDER != "payu":
+        return strip_id(booking)
+    try:
+        checkout = await create_checkout(
+            db, user=user, resource={"kind": "booking", "id": booking["id"]}, amount=price,
+            productinfo=f"Court booking - {f['name']}", customer_email=body.customer_email,
+        )
+        await db.bookings.update_one({"id": booking["id"]}, {"$set": {"payment": {**checkout["payment"], "provider": "payu"}}})
+        booking["payment"] = {**checkout["payment"], "provider": "payu"}
+        return {"booking": strip_id(booking), **checkout}
+    except Exception:
+        await db.bookings.delete_one({"id": booking["id"], "status": "pending_payment"})
+        raise
 
 @api.get("/bookings/mine")
 async def my_bookings(user=Depends(current_user)):
     items = await db.bookings.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return items
+
+
+@api.get("/payments/checkout/{payment_id}")
+async def payu_checkout(payment_id: str, token: str):
+    """Public, opaque one-time checkout page that auto-posts to PayU."""
+    txn = await db.payment_transactions.find_one({"id": payment_id, "checkout_token": token}, {"_id": 0})
+    if not txn or txn.get("status") != "initiated":
+        raise HTTPException(404, "Payment checkout is no longer available")
+    payu = PayU()
+    return HTMLResponse(checkout_html(payu.checkout_endpoint, payu.checkout_fields(txn)))
+
+
+@api.get("/payments/{payment_id}")
+async def payment_status(payment_id: str, user=Depends(current_user)):
+    txn = await db.payment_transactions.find_one({"id": payment_id, "user_id": user["id"]}, {"_id": 0, "checkout_token": 0, "payu_response": 0})
+    if not txn:
+        raise HTTPException(404, "Payment not found")
+    resource = txn.get("resource") or {}
+    collection = {"booking": db.bookings, "coach_session": db.coach_sessions, "tournament_registration": db.tournament_registrations, "order": db.orders}.get(resource.get("kind"))
+    item = await collection.find_one({"id": resource.get("id")}, {"_id": 0}) if collection else None
+    return {"payment": txn, "resource": item}
+
+
+async def _payu_callback_response(request: Request):
+    form = await request.form()
+    result = await process_callback(db, {str(key): str(value) for key, value in form.items()})
+    status = result["payment"]["status"]
+    return HTMLResponse(f"<html><body><h2>Payment {html.escape(status)}</h2><p>You may return to Kuchu Puchu.</p></body></html>")
+
+
+@api.post("/payments/payu/return")
+async def payu_return(request: Request):
+    return await _payu_callback_response(request)
+
+
+@api.post("/payments/payu/webhook")
+async def payu_webhook(request: Request):
+    return await _payu_callback_response(request)
 
 # ---------------------------------------------------------------------------
 # Games (open games)
@@ -406,6 +615,7 @@ async def list_games(sport: Optional[str] = None, skill: Optional[str] = None, c
     q: Dict[str, Any] = {}
     if sport: q["sport"] = sport
     if skill: q["skill_level"] = skill
+    q["is_demo"] = {"$ne": True}
     games = await db.games.find(q, {"_id": 0}).to_list(200)
     if city:
         facility_ids = [f["id"] for f in await db.facilities.find({"city": city}, {"_id": 0, "id": 1}).to_list(100)]
@@ -414,7 +624,7 @@ async def list_games(sport: Optional[str] = None, skill: Optional[str] = None, c
 
 @api.get("/games/{gid}")
 async def get_game(gid: str):
-    g = await db.games.find_one({"id": gid}, {"_id": 0})
+    g = await db.games.find_one({"id": gid, "is_demo": {"$ne": True}}, {"_id": 0})
     if not g: raise HTTPException(404, "Game not found")
     return await _enrich_game(g)
 
@@ -450,48 +660,88 @@ def _match_score(player: dict, user: dict) -> int:
 
 @api.get("/players")
 async def list_players(user=Depends(current_user)):
-    players=await db.players.find({}, {'_id':0}).to_list(200)
-    for p in players: p['match_score']=_match_score(p,user)
-    players.sort(key=lambda x:-x['match_score']); return players
+    """Return real onboarded users as player cards for 'Players Near You'.
+    Excludes demo players from seed data. Falls back to demo if DB is empty."""
+    real_users = await db.users.find(
+        {"onboarded": True, "id": {"$ne": user["id"]}},
+        {"_id": 0, "id": 1, "name": 1, "avatar": 1, "city": 1, "state": 1,
+         "area": 1, "primary_sport": 1, "skill_level": 1, "bio": 1,
+         "playing_style": 1, "location": 1, "lat": 1, "lng": 1}
+    ).to_list(200)
+    for p in real_users:
+        p["match_score"] = _match_score(p, user)
+        p["matches_played"] = await db.games.count_documents({"current_players": p["id"]})
+        p["is_real_user"] = True
+    real_users.sort(key=lambda x: -x["match_score"])
+    return real_users
 @api.get("/players/{pid}")
-async def get_player(pid:str,user=Depends(optional_user)):
-    p=await db.players.find_one({'id':pid},{'_id':0});
-    if not p: raise HTTPException(404,'Player not found')
-    if user: p['match_score']=_match_score(p,user)
+async def get_player(pid: str, user=Depends(optional_user)):
+    p = await db.users.find_one({"id": pid, "onboarded": True, "is_demo": {"$ne": True}}, {"_id": 0})
+    if not p:
+        p = await db.players.find_one({"id": pid, "is_demo": {"$ne": True}}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Player not found")
+    if user:
+        p["match_score"] = _match_score(p, user)
     return p
 
 @api.get("/coaches")
-async def list_coaches(city:Optional[str]=None): return await db.coaches.find({'city':city} if city else {},{'_id':0}).to_list(100)
+async def list_coaches(city:Optional[str]=None): return await db.coaches.find({'city':city, 'is_demo': {'$ne': True}} if city else {'is_demo': {'$ne': True}},{'_id':0}).to_list(100)
 @api.get("/coaches/{cid}")
 async def get_coach(cid:str):
-    c=await db.coaches.find_one({'id':cid},{'_id':0});
+    c=await db.coaches.find_one({'id':cid, 'is_demo': {'$ne': True}},{'_id':0});
     if not c: raise HTTPException(404,'Coach not found')
     return c
 @api.get('/events')
-async def list_events(city:Optional[str]=None): return await db.events.find({'city':city} if city else {},{'_id':0}).sort('date',1).to_list(100)
+async def list_events(city: Optional[str] = None, published_only: bool = True):
+    """List events. By default only returns published events (hides drafts from public)."""
+    q: Dict[str, Any] = {}
+    if city: q["city"] = city
+    q["is_demo"] = {"$ne": True}
+    if published_only: q["status"] = "published"
+    return await db.events.find(q, {'_id': 0}).sort('date', 1).to_list(100)
+
 @api.get('/events/{eid}')
-async def get_event(eid:str):
-    e=await db.events.find_one({'id':eid},{'_id':0});
-    if not e: raise HTTPException(404,'Event not found')
+async def get_event(eid: str):
+    e = await db.events.find_one({'id': eid, 'is_demo': {'$ne': True}}, {'_id': 0})
+    if not e: raise HTTPException(404, 'Event not found')
     return e
+
 @api.get('/tournaments')
-async def list_tournaments(city:Optional[str]=None): return await db.tournaments.find({'city':city} if city else {},{'_id':0}).sort('date',1).to_list(100)
+async def list_tournaments(city: Optional[str] = None, published_only: bool = True):
+    """List tournaments. By default only returns published tournaments."""
+    q: Dict[str, Any] = {}
+    if city: q["city"] = city
+    q["is_demo"] = {"$ne": True}
+    if published_only: q["status"] = "published"
+    return await db.tournaments.find(q, {'_id': 0}).sort('date', 1).to_list(100)
 @api.get('/tournaments/{tid}')
 async def get_tournament(tid:str):
-    t=await db.tournaments.find_one({'id':tid},{'_id':0});
+    t=await db.tournaments.find_one({'id':tid, 'is_demo': {'$ne': True}},{'_id':0});
     if not t: raise HTTPException(404,'Tournament not found')
     return t
 @api.post('/tournaments/{tid}/register')
-async def register_tournament(tid:str,user=Depends(current_user)):
-    t=await db.tournaments.find_one({'id':tid},{'_id':0});
-    if not t: raise HTTPException(404,'Tournament not found')
-    reg={'id':gen_id(),'user_id':user['id'],'tournament_id':tid,'payment':{'provider':'mock_payu','status':'paid','amount':t['entry_fee']},'created_at':utcnow().isoformat()}; await db.tournament_registrations.insert_one(reg.copy()); await db.tournaments.update_one({'id':tid},{'$inc':{'participants_count':1}}); return strip_id(reg)
+async def register_tournament(tid: str, body: Optional[PaymentContact] = None, user=Depends(current_user)):
+    t = await db.tournaments.find_one({'id': tid}, {'_id': 0})
+    if not t: raise HTTPException(404, 'Tournament not found')
+    reg = {'id': gen_id(), 'user_id': user['id'], 'tournament_id': tid, 'status': 'pending_payment' if PAYMENT_PROVIDER == 'payu' else 'confirmed', 'payment': {'provider': 'payu', 'status': 'initiated', 'amount': t['entry_fee']} if PAYMENT_PROVIDER == 'payu' else {'provider': 'mock_payu', 'status': 'paid', 'amount': t['entry_fee']}, 'created_at': utcnow().isoformat()}
+    await db.tournament_registrations.insert_one(reg.copy())
+    if PAYMENT_PROVIDER != 'payu':
+        await db.tournaments.update_one({'id': tid}, {'$inc': {'participants_count': 1}})
+        return strip_id(reg)
+    try:
+        checkout = await create_checkout(db, user=user, resource={'kind': 'tournament_registration', 'id': reg['id']}, amount=t['entry_fee'], productinfo=f"Tournament registration - {t['name']}", customer_email=(body.customer_email if body else None))
+        await db.tournament_registrations.update_one({'id': reg['id']}, {'$set': {'payment': {**checkout['payment'], 'provider': 'payu'}}})
+        return {'registration': strip_id(reg), **checkout}
+    except Exception:
+        await db.tournament_registrations.delete_one({'id': reg['id'], 'status': 'pending_payment'})
+        raise
 
 async def _enrich_post(p:dict,user_id:Optional[str])->dict:
     author=await db.players.find_one({'id':p['author_id']},{'_id':0}) or await db.users.find_one({'id':p['author_id']},{'_id':0}); p['author']=author; p['liked']=bool(user_id and await db.post_likes.find_one({'post_id':p['id'],'user_id':user_id})); return p
 @api.get('/posts')
 async def list_posts(user=Depends(optional_user)):
-    items=await db.posts.find({}, {'_id':0}).sort('created_at',-1).to_list(100); return [await _enrich_post(p,user['id'] if user else None) for p in items]
+    items=await db.posts.find({'is_demo': {'$ne': True}}, {'_id':0}).sort('created_at',-1).to_list(100); return [await _enrich_post(p,user['id'] if user else None) for p in items]
 @api.post('/posts')
 async def create_post(body:PostCreate,user=Depends(current_user)):
     post={'id':gen_id(),'author_id':user['id'],'content':body.content,'image':body.image,'likes':0,'comments_count':0,'created_at':utcnow().isoformat()}; await db.posts.insert_one(post.copy()); return await _enrich_post(strip_id(post),user['id'])
@@ -506,15 +756,16 @@ async def list_products(category:Optional[str]=None,sport:Optional[str]=None):
     q={};
     if category:q['category']=category
     if sport:q['sport']=sport
+    q["is_demo"] = {"$ne": True}; q["status"] = "active"
     return await db.products.find(q,{'_id':0}).to_list(200)
 @api.get('/products/{pid}')
 async def get_product(pid:str):
-    p=await db.products.find_one({'id':pid},{'_id':0});
+    p=await db.products.find_one({'id':pid, 'is_demo': {'$ne': True}, 'status': 'active'},{'_id':0});
     if not p: raise HTTPException(404,'Product not found')
     return p
 @api.get('/products/recommend/for-me')
 async def recommend_products(user=Depends(current_user)):
-    products=await db.products.find({}, {'_id':0}).to_list(200); skill=user.get('skill_level','Beginner')
+    products=await db.products.find({'is_demo': {'$ne': True}, 'status': 'active'}, {'_id':0}).to_list(200); skill=user.get('skill_level','Beginner')
     for p in products:
         s=50
         if skill in (p.get('recommended_skill') or ''): s+=20
@@ -545,18 +796,29 @@ async def cart_remove(body:CartAdd,user=Depends(current_user)):
     if cart: await db.carts.update_one({'user_id':user['id']},{'$set':{'items':[it for it in cart['items'] if it['product_id']!=body.product_id]}})
     return await get_cart(user)
 @api.post('/orders')
-async def create_order(body:OrderCreate,user=Depends(current_user)):
-    cart=await db.carts.find_one({'user_id':user['id']},{'_id':0});
-    if not cart or not cart.get('items'): raise HTTPException(400,'Cart is empty')
+async def create_order(body: OrderCreate, user=Depends(current_user)):
+    cart = await db.carts.find_one({'user_id': user['id']}, {'_id': 0})
+    if not cart or not cart.get('items'): raise HTTPException(400, 'Cart is empty')
     line_items=[]; total=0
     for it in cart['items']:
         prod=await db.products.find_one({'id':it['product_id']},{'_id':0})
         if prod: line_items.append({'product':prod,'qty':it['qty'],'subtotal':prod['price']*it['qty']}); total+=prod['price']*it['qty']
-    order={'id':gen_id(),'user_id':user['id'],'items':line_items,'total':total,'address':body.address,'status':'confirmed','payment':{'provider':'mock_payu','status':'paid','amount':total},'created_at':utcnow().isoformat()}; await db.orders.insert_one(order.copy()); await db.carts.update_one({'user_id':user['id']},{'$set':{'items':[]}}); return strip_id(order)
+    order={'id':gen_id(),'user_id':user['id'],'items':line_items,'total':total,'address':body.address,'status':'pending_payment' if PAYMENT_PROVIDER == 'payu' else 'confirmed','payment':{'provider':'payu','status':'initiated','amount':total} if PAYMENT_PROVIDER == 'payu' else {'provider':'mock_payu','status':'paid','amount':total},'created_at':utcnow().isoformat()}
+    await db.orders.insert_one(order.copy())
+    if PAYMENT_PROVIDER != 'payu':
+        await db.carts.update_one({'user_id':user['id']},{'$set':{'items':[]}})
+        return strip_id(order)
+    try:
+        checkout = await create_checkout(db, user=user, resource={'kind': 'order', 'id': order['id']}, amount=total, productinfo=f"Kuchu Puchu order ({len(line_items)} item{'s' if len(line_items) != 1 else ''})", customer_email=body.customer_email)
+        await db.orders.update_one({'id': order['id']}, {'$set': {'payment': {**checkout['payment'], 'provider': 'payu'}}})
+        return {'order': strip_id(order), **checkout}
+    except Exception:
+        await db.orders.delete_one({'id': order['id'], 'status': 'pending_payment'})
+        raise
 @api.get('/orders/mine')
 async def my_orders(user=Depends(current_user)): return await db.orders.find({'user_id':user['id']},{'_id':0}).sort('created_at',-1).to_list(100)
 
-AI_COACH_SYSTEM = """You are Kuvira AI Coach — a world-class pickleball & racket-sports coach.
+AI_COACH_SYSTEM = """You are Kuchu Puchu AI Coach — a world-class multi-sport coach for badminton, cricket, football, tennis and pickleball.
 
 You know the player's profile: sport, skill level, city, playing style, goals.
 Be concise (2-4 short paragraphs max), specific, and actionable.
@@ -575,16 +837,16 @@ def _build_user_context(user:dict)->str:
     return '\n'.join(parts)
 @api.post('/ai/coach/chat')
 async def ai_coach_chat(body:ChatMessage,user=Depends(current_user)):
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    # Compatibility route for older app builds. It deliberately uses the same
+    # configured provider as the agentic AI Coach, including Vertex in prod.
+    from ai_coach.providers import get_default_provider
     session_id=body.session_id or f"coach-{user['id']}"; history=await db.ai_chat.find({'session_id':session_id},{'_id':0}).sort('created_at',1).to_list(50); system=AI_COACH_SYSTEM+'\n\nPlayer profile:\n'+_build_user_context(user)
-    chat=LlmChat(api_key=EMERGENT_LLM_KEY,session_id=session_id,system_message=system).with_model('anthropic','claude-sonnet-4-6')
     try:
-        prefix=''
-        if history:
-            recent=history[-6:]; prefix='Recent conversation:\n'+'\n'.join(f"{h['role'].capitalize()}: {h['text']}" for h in recent)+'\n\nNow the player says:\n'
-        response=await chat.send_message(UserMessage(text=prefix+body.text))
+        messages=[{"role": h["role"], "content": h["text"]} for h in history[-8:] if h.get("role") in {"user", "assistant"}]
+        messages.append({"role": "user", "content": body.text})
+        response=await get_default_provider().generate_coaching_response(system, messages)
     except Exception as e:
-        log.exception('AI coach error'); raise HTTPException(500,f'AI Coach unavailable: {str(e)[:100]}')
+        log.exception('AI coach error'); raise HTTPException(502,f'AI Coach unavailable: {str(e)[:100]}')
     now=utcnow().isoformat(); await db.ai_chat.insert_one({'session_id':session_id,'user_id':user['id'],'role':'user','text':body.text,'created_at':now}); await db.ai_chat.insert_one({'session_id':session_id,'user_id':user['id'],'role':'assistant','text':response,'created_at':utcnow().isoformat()}); return {'session_id':session_id,'reply':response}
 @api.get('/ai/coach/history')
 async def ai_coach_history(session_id:Optional[str]=None,user=Depends(current_user)):
@@ -621,11 +883,16 @@ async def ai_insights(user=Depends(current_user)):
     }
 @api.get('/ai/recommendations')
 async def ai_recommendations(user=Depends(current_user)):
-    products=await db.products.find({}, {'_id':0}).to_list(6); games=await db.games.find({}, {'_id':0}).to_list(4); return {'insight':'Your playing frequency is up 20% this month. Focus on backhand this week.','products':products[:3],'games':[await _enrich_game(g) for g in games[:3]]}
+    products=await db.products.find({'is_demo': {'$ne': True}, 'status': 'active'}, {'_id':0}).to_list(6); games=await db.games.find({'is_demo': {'$ne': True}}, {'_id':0}).to_list(4); return {'insight':None,'products':products[:3],'games':[await _enrich_game(g) for g in games[:3]]}
 
 @api.get('/search')
-async def search(q:str):
-    q_lower=q.lower(); facilities=[f for f in await db.facilities.find({}, {'_id':0}).to_list(200) if q_lower in f['name'].lower() or q_lower in f['area'].lower()]; players=[p for p in await db.players.find({}, {'_id':0}).to_list(200) if q_lower in p['name'].lower()]; products=[p for p in await db.products.find({}, {'_id':0}).to_list(200) if q_lower in p['name'].lower() or q_lower in p['category'].lower()]; events=[e for e in await db.events.find({}, {'_id':0}).to_list(100) if q_lower in e['name'].lower()]; return {'facilities':facilities[:8],'players':players[:8],'products':products[:8],'events':events[:8]}
+async def search(q: str):
+    q_lower = q.lower()
+    facilities = [f for f in await db.facilities.find({'is_demo': {'$ne': True}, 'status': {'$ne': 'inactive'}}, {'_id': 0}).to_list(200) if q_lower in f['name'].lower() or q_lower in f.get('area', '').lower() or q_lower in f.get('city', '').lower()]
+    players = [p for p in await db.users.find({'onboarded': True, 'is_demo': {'$ne': True}}, {'_id': 0, 'id': 1, 'name': 1, 'avatar': 1, 'city': 1, 'area': 1, 'skill_level': 1, 'primary_sport': 1}).to_list(200) if q_lower in (p.get('name') or '').lower()]
+    products = [p for p in await db.products.find({'is_demo': {'$ne': True}, 'status': 'active'}, {'_id': 0}).to_list(200) if q_lower in p['name'].lower() or q_lower in p.get('category', '').lower()]
+    events = [e for e in await db.events.find({'is_demo': {'$ne': True}, 'status': 'published'}, {'_id': 0}).to_list(100) if q_lower in e['name'].lower()]
+    return {'facilities': facilities[:8], 'players': players[:8], 'products': products[:8], 'events': events[:8]}
 
 # ---------------------------------------------------------------------------
 # Capabilities (backend-determined; drives workspace switching in the app)
@@ -638,4 +905,12 @@ app.include_router(features.router)
 app.include_router(org_admin.router)
 from ai_coach.router import router as ai_coach_router
 app.include_router(ai_coach_router)
-app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=CORS_ALLOWED_ORIGINS, allow_methods=['*'], allow_headers=['*'])
+app.add_middleware(
+    CORSMiddleware,
+    # Browsers reject wildcard origins with credentials. Development may use
+    # the wildcard without credentials; production validates explicit origins.
+    allow_credentials='*' not in CORS_ALLOWED_ORIGINS,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)

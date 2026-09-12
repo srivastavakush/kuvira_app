@@ -1,59 +1,100 @@
-"""Seed of coaching knowledge — tiered by authority.
+"""Curated, source-attributed starter corpus for Kuchu Puchu AI Coach.
 
-Tier 1 (authority=1): rules / research
-Tier 2 (authority=2): expert coaching methodology
-Tier 3 (authority=3): Kuvira proprietary drill / tactical library
-
-This is deliberately small; it is a foundation, not a corpus.
+These are short, original coaching notes distilled from the named official
+sources; they are not scraped or copied rule books. Refreshing this registry
+re-verifies source URLs and replaces only content that has changed.
 """
-from .retriever.base import KnowledgeItem
+from __future__ import annotations
+
+from .retriever.ingestion import SourceDocument
 
 
-def seed_items() -> list[KnowledgeItem]:
+def seed_documents() -> list[SourceDocument]:
     return [
-        # ------------------- Tier 1: rules & research
-        KnowledgeItem(id="pk-rules-nvz", title="Non-volley zone (kitchen) rules",
-            body="Players may not volley the ball (strike it out of the air without a bounce) while standing in the non-volley zone or with any body part touching it. Momentum from a volley that carries a player into the NVZ is also a fault.",
-            category="rules", source_type="rulebook", source_name="USA Pickleball Rulebook", authority_level=1, confidence=0.98),
-        KnowledgeItem(id="pk-rules-serve", title="Legal serve mechanics",
-            body="Serve is underhand, contact below the waist, served diagonally to the opposite service court. Only one serve attempt (except lets under the current rules).",
-            category="rules", source_type="rulebook", source_name="USA Pickleball Rulebook", authority_level=1, confidence=0.98),
-        KnowledgeItem(id="pk-science-transition", title="Transition play and unforced errors",
-            body="Sports-analytics work on racket sports consistently finds that most unforced errors occur while moving forward from the baseline. Controlled resets — low, slow, into the opponent kitchen — reduce error rate.",
-            category="tactical", situation="transition", source_type="research", source_name="applied racket-sport analytics", authority_level=1, confidence=0.85),
-        # ------------------- Tier 2: expert coaching
-        KnowledgeItem(id="pk-coach-3sd", title="Third-shot drop fundamentals",
-            body="After a return of serve, the serving team is best served hitting a soft third shot that arcs into the opposing kitchen. Key cues: paddle face slightly open, contact out in front, use legs rather than arm, aim for a target 2–3 feet inside the kitchen line.",
-            category="technical", skill="third_shot_drop", situation="post_return", source_type="coaching", source_name="consensus coaching methodology", authority_level=2, confidence=0.9),
-        KnowledgeItem(id="pk-coach-dink", title="Dinking principles",
-            body="Dinks should be arced, contact out in front, targeted to the opponent's non-dominant hip or crosscourt to increase court angle. Keep the paddle face open, use shoulder rotation, avoid wrist snap.",
-            category="technical", skill="dink", situation="kitchen", source_type="coaching", source_name="consensus coaching methodology", authority_level=2, confidence=0.9),
-        KnowledgeItem(id="pk-coach-backhand", title="Backhand consistency",
-            body="For two-handed backhands, initiate the swing from the shoulder with a stable, connected wrist and follow through toward the target. For one-handers, keep the elbow relaxed and use body rotation for power. Consistency is built from a stable contact point out in front of the body.",
-            category="technical", skill="backhand", source_type="coaching", source_name="consensus coaching methodology", authority_level=2, confidence=0.85),
-        KnowledgeItem(id="pk-coach-serve-return", title="Return of serve strategy",
-            body="Return deep, high and slow. A deep return buys time for the returner to move to the kitchen line and puts the serving team on the defensive. Aim for the middle-third of the baseline.",
-            category="tactical", skill="return", situation="post_serve", source_type="coaching", source_name="consensus coaching methodology", authority_level=2, confidence=0.88),
-        KnowledgeItem(id="pk-coach-positioning", title="Court positioning at the kitchen line",
-            body="The team that reaches the kitchen line first almost always wins the point. Stay centered relative to the ball, keep the paddle up and out in front, move as a unit with your partner — if one goes, both go.",
-            category="tactical", skill="positioning", source_type="coaching", source_name="consensus coaching methodology", authority_level=2, confidence=0.9),
-        # ------------------- Tier 3: Kuvira proprietary drill library
-        KnowledgeItem(id="pk-kuvira-drill-3sd", title="Kuvira “Third-Shot Ladder” drill",
-            body="Feed a return of serve to Player A. Player A hits a third-shot drop from the baseline. If it lands inside the kitchen and not attackable, they advance one step. If not, they reset. Goal: 8/10 successful drops in a row before advancing to full transition.",
-            category="drill", skill="third_shot_drop", source_type="kuvira", source_name="Kuvira drill library", authority_level=3, confidence=0.9),
-        KnowledgeItem(id="pk-kuvira-drill-reset", title="Kuvira “Controlled Reset” drill",
-            body="Coach or partner drives balls at chest height from mid-court. Player must reset each drive softly into the kitchen. Track error percentage across 20 balls. Success target: below 12% errors before increasing feed speed.",
-            category="drill", skill="reset", situation="transition", source_type="kuvira", source_name="Kuvira drill library", authority_level=3, confidence=0.9),
-        KnowledgeItem(id="pk-kuvira-drill-dink", title="Kuvira “Cross-Court Dink Rally” drill",
-            body="Both players stand at the kitchen line diagonally. Rally cross-court dinks for 60 seconds without missing. Progress: 30 → 60 → 90 seconds. Adds pressure on the third round by adding a target zone (opponent's non-dominant hip).",
-            category="drill", skill="dink", source_type="kuvira", source_name="Kuvira drill library", authority_level=3, confidence=0.9),
-        KnowledgeItem(id="pk-kuvira-framework-attacking", title="Kuvira attacking-decision framework",
-            body="Attack only when three conditions align: (1) the ball is above net height, (2) you are balanced and moving forward or stationary, (3) your partner is at the kitchen line. If any condition fails, reset instead.",
-            category="tactical", skill="attacking_decision", source_type="kuvira", source_name="Kuvira tactical framework", authority_level=3, confidence=0.9),
-        KnowledgeItem(id="pk-kuvira-archetype-banger", title="Player archetype: banger",
-            body="A ‘banger’ relies on drives and pace. Common weaknesses: struggles in dink rallies, over-attacks low balls, gets pulled forward by soft returns. Coaching: build dink and reset patience, punish with unattackable third-shot drops.",
-            category="archetype", source_type="kuvira", source_name="Kuvira player archetypes", authority_level=3, confidence=0.85),
-        KnowledgeItem(id="pk-kuvira-archetype-dinker", title="Player archetype: dinker",
-            body="A ‘dinker’ relies on soft-game patience and shot placement. Common weaknesses: passive on attackable balls, slow to move forward on short returns. Coaching: sharpen decision-making on attackable balls, build controlled counter-attack.",
-            category="archetype", source_type="kuvira", source_name="Kuvira player archetypes", authority_level=3, confidence=0.85),
+        SourceDocument(
+            title="Pickleball: non-volley-zone faults", sport="pickleball", topic="rules and kitchen play",
+            category="rules", source_type="rulebook", source_name="USA Pickleball", authority_level=1,
+            source_url="https://usapickleball.org/rules/", source_updated_at="2026-01-01",
+            tags=("kitchen", "non-volley zone", "volley", "fault"),
+            text="A player cannot volley while touching the non-volley zone or its line. A volley can also be a fault if the player's momentum from that volley carries them into the zone. Coach the safe alternative: let a low ball bounce, then play it from a balanced position.",
+        ),
+        SourceDocument(
+            title="Pickleball: serve and return priorities", sport="pickleball", topic="serve and return",
+            category="rules", skill="serve", situation="start of rally", source_type="rulebook", source_name="USA Pickleball",
+            authority_level=1, source_url="https://usapickleball.org/rules/", source_updated_at="2026-01-01",
+            tags=("serve", "return", "diagonal", "baseline"),
+            text="Use the current USA Pickleball rulebook for the exact legal serve requirements because they are revised periodically. In play, keep the first objective simple: begin the rally legally, return with margin, and recover into a ready position rather than chasing a low-percentage winner.",
+        ),
+        SourceDocument(
+            title="Pickleball: third-shot drop progression", sport="pickleball", topic="transition and soft game",
+            category="technical", skill="third-shot drop", situation="after return of serve", source_type="kuvirasports",
+            source_name="Kuchu Puchu coaching playbook", authority_level=3, confidence=0.75,
+            source_url=None, source_updated_at=None,
+            tags=("third shot", "drop", "transition", "common mistake", "beginner"), skill_level="Beginner",
+            text="Use a cooperative progression for a third-shot drop: first clear the net with height, then land in the non-volley zone, then add direction. A common mistake is forcing a fast, low ball while off balance. If the ball is below net height or the player is moving, choose a safer reset before advancing.",
+        ),
+        SourceDocument(
+            title="Badminton: rally scoring and service courts", sport="badminton", topic="rules and scoring",
+            category="rules", source_type="rulebook", source_name="Badminton World Federation", authority_level=1,
+            source_url="https://system.bwfbadminton.com/documents/folder_1_81/Statutes/CHAPTER-4---RULES-OF-THE-GAME/Section%204.1-%20Laws%20of%20Badminton%20-%2019052018A.pdf",
+            source_updated_at="2018-05-19", tags=("scoring", "service", "court", "rally"),
+            text="Badminton uses rally-point scoring: every rally awards a point. Service court and serving order change with the score, so players should confirm the current score before serving. For league play, follow the competition's regulations where they modify the BWF Laws.",
+        ),
+        SourceDocument(
+            title="Badminton: recover to a neutral base", sport="badminton", topic="movement and court coverage",
+            category="movement", skill="footwork", situation="after shot", source_type="kuvirasports",
+            source_name="Kuchu Puchu coaching playbook", authority_level=3, confidence=0.75,
+            source_url=None,
+            tags=("footwork", "recovery", "split step", "common mistake"), skill_level="Beginner",
+            text="After each shot, recover toward a neutral base with the racquet up and knees flexed. Do not watch the shuttle from a deep corner; begin recovery as the shot leaves the strings. A practical drill is shadow movement to six corners: split step, move, mime the shot, recover, then repeat for controlled time intervals.",
+        ),
+        SourceDocument(
+            title="Tennis: service, scoring and court rules", sport="tennis", topic="rules and scoring",
+            category="rules", source_type="rulebook", source_name="International Tennis Federation", authority_level=1,
+            source_url="https://www.itftennis.com/media/7221/2026-rules-of-tennis-english.pdf", source_updated_at="2026-01-01",
+            tags=("serve", "scoring", "court", "rules"),
+            text="Use the current ITF Rules of Tennis for official scoring, serving and court questions. The serve starts each point from behind the baseline and must land in the diagonally opposite service box. In a sanctioned event, the event conditions and ITF rules control any disputed call.",
+        ),
+        SourceDocument(
+            title="Tennis: recover after each groundstroke", sport="tennis", topic="court positioning",
+            category="tactical", skill="court positioning", situation="rally", source_type="coaching", source_name="USTA", authority_level=2,
+            source_url="https://www.usta.com/en/home/improve/tips-and-instruction/national/improve-your-tennis-game--court-positioning.html",
+            source_updated_at="2018-07-02", tags=("recovery", "baseline", "positioning", "drill"), skill_level="Beginner",
+            text="For a beginner rally, recover toward a usable home-base position after each shot rather than staying where the ball was hit. The USTA Ready, Rally and Recover concept uses repetition to connect shot recovery with the next-ball preparation. Start slowly, then add a directional target and a live-ball feed.",
+        ),
+        SourceDocument(
+            title="Tennis: simple volley cue", sport="tennis", topic="volleys and net play",
+            category="technical", skill="volley", situation="at net", source_type="coaching", source_name="USTA", authority_level=2,
+            source_url="https://www.usta.com/en/home/improve/tips-and-instruction/national/learning-the-basics--volleys.html",
+            source_updated_at="2017-01-01", tags=("volley", "continental grip", "common mistake", "net"), skill_level="Beginner",
+            text="For beginner volleys, reduce the backswing and make a compact blocking action. The USTA cue 'squeeze and freeze' helps prevent the common mistake of swinging too much at the ball. Build confidence with cooperative feeds before using the volley in point play.",
+        ),
+        SourceDocument(
+            title="Football: scan before and after receiving", sport="football", topic="passing and decision making",
+            category="technical", skill="passing", situation="in possession", source_type="coaching", source_name="The FA Boot Room", authority_level=2,
+            source_url="https://www.thefa.com/bootroom/resources/coaching/how-to-coach-passing-in-football", source_updated_at="2022-03-15",
+            tags=("passing", "scanning", "decision making", "first touch", "common mistake"), skill_level="Beginner",
+            text="Passing starts with information. Scan to find team-mates, space and pressure before receiving; then use a first touch that preserves the next pass. A common mistake is passing immediately without checking options. Use a small-sided directional game and award a bonus when the receiver opens their body and finds a forward option safely.",
+        ),
+        SourceDocument(
+            title="Football: Laws of the Game", sport="football", topic="rules",
+            category="rules", source_type="rulebook", source_name="The IFAB", authority_level=1,
+            source_url="https://www.theifab.com/laws-of-the-game-documents/?language=en", source_updated_at="2026-07-01",
+            tags=("laws", "offside", "fouls", "restart"),
+            text="For decisions on offside, fouls, restarts and match procedure, use the current IFAB Laws of the Game. Local competitions may publish additional competition rules, but they do not replace the Laws unless the competition is authorised to make that modification.",
+        ),
+        SourceDocument(
+            title="Cricket: starter skill practice", sport="cricket", topic="batting bowling fielding",
+            category="drill", skill="fundamentals", situation="practice", source_type="coaching", source_name="International Cricket Council", authority_level=2,
+            source_url="https://www.icc-cricket.com/criiio/skills-and-drills", source_updated_at="2023-11-12",
+            tags=("batting", "bowling", "catching", "throwing", "drill", "beginner"), skill_level="Beginner",
+            text="For a new player, separate batting, bowling, catching and throwing into simple, repeatable practices, then combine them in a small-sided game. Use a clear target for each attempt and give feedback on one cue at a time. Increase distance, speed or decision pressure only after the basic movement is controlled.",
+        ),
+        SourceDocument(
+            title="Cricket: Laws and competition conditions", sport="cricket", topic="rules and match awareness",
+            category="rules", source_type="rulebook", source_name="Marylebone Cricket Club", authority_level=1,
+            source_url="https://www.lords.org/mcc/the-laws", source_updated_at="2022-10-01",
+            tags=("laws", "wide", "no ball", "dismissal", "scoring"),
+            text="MCC is the custodian of the Laws of Cricket. Use the current Laws for questions on dismissals, scoring, wides, no-balls and player conduct; higher-level matches may also use ICC or tournament playing conditions, which can change how a Law is applied in that competition.",
+        ),
     ]

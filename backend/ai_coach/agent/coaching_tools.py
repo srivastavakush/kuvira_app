@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict
 from ..coaching_state import CoachingStateService
 from .workflow import AgenticCoachWorkflow
-from .tools import AgentTool
 
 
 class CoachingTools:
@@ -36,9 +35,10 @@ class LongitudinalCoachWorkflow(AgenticCoachWorkflow):
     def _register_tools(self) -> None:
         super()._register_tools()
         self.coaching = CoachingTools(self.db)
-        self.tools.register(AgentTool("get_coaching_state", "Load persistent player coaching state.", self.coaching.get_coaching_state))
-        self.tools.register(AgentTool("get_training_history", "Load training assignments and outcomes.", self.coaching.get_training_history))
-        self.tools.register(AgentTool("get_previous_recommendations", "Load prior coaching recommendations.", self.coaching.get_previous_recommendations))
+        # AgenticCoachWorkflow already registers these read tools with handlers
+        # that accept the planner's full context (`match_id`, `video_id`, etc.).
+        # Registering the narrower CoachingTools methods a second time made every
+        # match-report request fail during workflow construction.
 
     async def run(self, **kwargs: Any):
         result = await super().run(**kwargs)

@@ -19,13 +19,15 @@ class JobQueue:
             if not self.queue_url: raise RuntimeError("AI_COACH_SQS_QUEUE_URL is required for SQS")
             import boto3
             self._client = boto3.client("sqs", region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
-        elif self.backend != "local":
+        elif self.backend not in {"local", "worker"}:
             raise RuntimeError(f"Unsupported AI_COACH_QUEUE_BACKEND: {self.backend}")
 
     def enqueue(self, job_id: str) -> None:
         if self.backend == "sqs":
             assert self._client is not None
             self._client.send_message(QueueUrl=self.queue_url, MessageBody=json.dumps({"job_id": job_id}))
+        # backend=worker intentionally needs no dispatch call. The dedicated
+        # worker claims the durable Mongo job record directly.
 
     def receive(self) -> Optional[dict[str, Any]]:
         if self.backend != "sqs":

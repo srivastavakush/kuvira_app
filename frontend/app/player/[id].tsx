@@ -6,34 +6,40 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, font, radius } from '@/src/theme';
-import { Loader } from '@/src/components/ui';
+import { Loader, Avatar } from '@/src/components/ui';
 import { api } from '@/src/api';
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
 
 export default function PlayerDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useSession();
   const [p, setP] = useState<any>(null);
 
   useEffect(() => { (async () => setP(await api.player(String(id))))(); }, [id]);
   if (!p) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
 
-  const winRate = Math.round((p.wins / Math.max(1, p.matches_played)) * 100);
+  const winRate = Math.round(((p.wins || 0) / Math.max(1, p.matches_played || 0)) * 100);
+  const startGame = () => { if (requireAuth(user, router, `/player/${id}`)) router.push('/create-game'); };
 
   return (
     <View style={styles.wrap} testID="player-detail-screen">
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Image source={{ uri: p.avatar }} style={StyleSheet.absoluteFillObject} contentFit="cover" blurRadius={30} />
-          <LinearGradient colors={['rgba(10,10,10,0.4)', colors.surface]} style={StyleSheet.absoluteFillObject} />
+          {p.avatar ? (
+            <Image source={{ uri: p.avatar }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={30} />
+          ) : null}
+          <LinearGradient colors={['rgba(10,10,10,0.4)', colors.surface]} style={StyleSheet.absoluteFill} />
           <SafeAreaView edges={['top']}>
             <Pressable testID="player-back" onPress={() => router.back()} style={styles.backBtn}>
               <Ionicons name="chevron-back" size={24} color={colors.onSurface} />
             </Pressable>
           </SafeAreaView>
           <View style={styles.heroCenter}>
-            <Image source={{ uri: p.avatar }} style={styles.avatar} />
+            <Avatar uri={p.avatar} name={p.name} size={108} style={{ marginBottom: spacing.md }} />
             <Text style={styles.name}>{p.name}</Text>
-            <Text style={styles.meta}>{p.skill_level} · {p.area}, {p.city}</Text>
+            <Text style={styles.meta}>{p.skill_level || 'Player'} · {p.area ? `${p.area}, ` : ''}{p.city || 'India'}</Text>
             {p.match_score != null && (
               <View style={styles.matchPill}>
                 <Text style={styles.matchPillText}>{p.match_score}% match</Text>
@@ -60,10 +66,10 @@ export default function PlayerDetail() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable testID="player-invite-btn" style={styles.ghostBtn} onPress={() => router.push('/create-game')}>
+        <Pressable testID="player-invite-btn" style={styles.ghostBtn} onPress={startGame}>
           <Text style={styles.ghostBtnText}>Invite to Game</Text>
         </Pressable>
-        <Pressable testID="player-challenge-btn" style={styles.primaryBtn} onPress={() => router.push('/create-game')}>
+        <Pressable testID="player-challenge-btn" style={styles.primaryBtn} onPress={startGame}>
           <Text style={styles.primaryBtnText}>Challenge</Text>
         </Pressable>
       </View>

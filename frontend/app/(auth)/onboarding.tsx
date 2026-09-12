@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, TextInput, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing, font, radius } from '@/src/theme';
 import { Button } from '@/src/components/ui';
 import { api } from '@/src/api';
@@ -11,13 +11,16 @@ const FREQUENCIES = ['1-2x per week', '3-4x per week', '5+x per week'];
 const MODES = ['Recreational', 'Competitive', 'Both'];
 const GOALS = ['Play more', 'Improve skills', 'Compete in tournaments', 'Meet players', 'Get coaching', 'Buy equipment'];
 const CITIES = ['Bangalore', 'Mumbai', 'Delhi', 'Pune', 'Chennai', 'Hyderabad'];
+const SPORTS = ['Badminton', 'Cricket', 'Football', 'Tennis', 'Pickleball', 'Running'];
 
 export default function Onboarding() {
   const router = useRouter();
+  const { next } = useLocalSearchParams<{ next?: string }>();
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
   const [city, setCity] = useState('Bangalore');
   const [skill, setSkill] = useState('Intermediate');
+  const [sport, setSport] = useState('Badminton');
   const [freq, setFreq] = useState('1-2x per week');
   const [mode, setMode] = useState('Recreational');
   const [goals, setGoals] = useState<string[]>(['Play more', 'Improve skills']);
@@ -32,11 +35,11 @@ export default function Onboarding() {
     try {
       await api.onboarding({
         name: name.trim() || 'Athlete',
-        city, primary_sport: 'sport-pickleball',
-        sports: ['sport-pickleball'], skill_level: skill,
+        city, primary_sport: `sport-${sport.toLowerCase()}`,
+        sports: [`sport-${sport.toLowerCase()}`], skill_level: skill,
         playing_frequency: freq, competitive: mode, goals,
       });
-      router.replace('/(tabs)/home');
+      router.replace((next || '/(tabs)/home') as any);
     } finally { setLoading(false); }
   }
 
@@ -52,7 +55,7 @@ export default function Onboarding() {
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {step === 0 && (
           <View>
-            <Text style={styles.h1}>Welcome to Kuvira.</Text>
+            <Text style={styles.h1}>Welcome to Kuchu Puchu.</Text>
             <Text style={styles.sub}>Let{'\u2019'}s set up your player identity.</Text>
             <Text style={styles.label}>Your name</Text>
             <TextInput testID="onboarding-name-input" value={name} onChangeText={setName} placeholder="e.g. Arjun" placeholderTextColor={colors.onSurfaceMuted} style={styles.input} />
@@ -70,6 +73,9 @@ export default function Onboarding() {
           <View>
             <Text style={styles.h1}>What{'\u2019'}s your skill level?</Text>
             <Text style={styles.sub}>Pickleball · we{'\u2019'}ll personalize matches & training.</Text>
+            <View style={[styles.optRow, { marginBottom: spacing.lg }]}>
+              {SPORTS.map((item) => <Pressable key={item} onPress={() => setSport(item)} style={[styles.opt, sport === item && styles.optActive]}><Text style={[styles.optText, sport === item && styles.optTextActive]}>{item}</Text></Pressable>)}
+            </View>
             {SKILL_LEVELS.map((s) => (
               <Pressable key={s} testID={`onboarding-skill-${s}`} onPress={() => setSkill(s)} style={[styles.bigOpt, skill === s && styles.bigOptActive]}>
                 <Text style={[styles.bigOptText, skill === s && styles.bigOptTextActive]}>{s}</Text>

@@ -57,8 +57,8 @@ export default function CoachDetail() {
     <View style={styles.wrap} testID="coach-detail-screen">
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Image source={{ uri: coach.image || coach.avatar }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-          <LinearGradient colors={['rgba(10,10,10,0.4)', 'transparent', 'rgba(10,10,10,0.95)']} locations={[0, 0.5, 1]} style={StyleSheet.absoluteFillObject} />
+          <Image source={{ uri: coach.image || coach.avatar }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <LinearGradient colors={['rgba(10,10,10,0.4)', 'transparent', 'rgba(10,10,10,0.95)']} locations={[0, 0.5, 1]} style={StyleSheet.absoluteFill} />
           <SafeAreaView edges={['top']}>
             <Pressable testID="coach-back" onPress={() => router.back()} style={styles.backBtn}><Ionicons name="chevron-back" size={24} color={colors.onSurface} /></Pressable>
           </SafeAreaView>

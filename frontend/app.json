@@ -1,26 +1,22 @@
 {
   "expo": {
-    "name": "Kuvira Sports",
-    "slug": "kuvira-sports",
+    "name": "Kuchu Puchu",
+    "slug": "kuchu-puchu",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "kuvira",
+    "scheme": "kuchupuchu",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.kuvirasportsapp.zwrxyl",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "bundleIdentifier": "com.emergent.kuvirasportsapp.zwrxyl"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#FFFDF8"
       },
-      "edgeToEdgeEnabled": true,
-      "package": "com.emergent.kuvirasportsapp.zwrxyl",
-      "googleServicesFile": "./google-services.json"
+      "package": "com.emergent.kuvirasportsapp.zwrxyl"
     },
     "web": {
       "bundler": "metro",
@@ -29,14 +25,19 @@
     },
     "plugins": [
       "expo-router",
-      "@react-native-firebase/app",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Kuchu Puchu uses your photo library only when you choose a profile photo or match video."
+        }
+      ],
       [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#FFFDF8"
         }
       ]
     ],

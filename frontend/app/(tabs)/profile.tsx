@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -8,6 +8,7 @@ import { c, spacing, font, radius } from '@/src/theme';
 import { Button, Divider } from '@/src/components/ui';
 import { api, clearToken } from '@/src/api';
 import { useSession } from '@/src/session';
+import * as ImagePicker from 'expo-image-picker';
 
 export default function Profile() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function Profile() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [orgs, setOrgs] = useState<any[]>([]);
   const [caps, setCaps] = useState<any>(null);
+  const [savingPhoto, setSavingPhoto] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -36,13 +38,49 @@ export default function Profile() {
 
   async function signOut() { await clearToken(); await refresh(); }
 
+  async function changeProfilePhoto() {
+    if (savingPhoto) return;
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Please allow photo library access to update your profile photo.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.82,
+        // Request a compatible, local file so iCloud-only photos can be uploaded.
+        shouldDownloadFromNetwork: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      setSavingPhoto(true);
+      await api.uploadMyAvatar(asset.uri, asset.fileName || 'profile.jpg', asset.mimeType || 'image/jpeg');
+      await refresh();
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      const isCloudAsset = /PHPhotosErrorDomain|3164/i.test(message);
+      Alert.alert(
+        'Could not update photo',
+        isCloudAsset
+          ? 'This photo is not currently available on this phone. Open it in Apple Photos, wait for the cloud download to finish, then try again.'
+          : 'Please choose a JPG, PNG, or WebP image under 5 MB.'
+      );
+    } finally {
+      setSavingPhoto(false);
+    }
+  }
+
   if (!user) {
     return (
       <SafeAreaView style={styles.guestWrap} testID="profile-login-screen">
         <View style={styles.guestIcon}>
           <Ionicons name="person-outline" size={28} color={c.textSecondary} />
         </View>
-        <Text style={styles.guestTitle}>Your Kuvira profile</Text>
+        <Text style={styles.guestTitle}>Your Kuchu Puchu profile</Text>
         <Text style={styles.guestSubtitle}>Sign in to manage your games, bookings and personalized experience.</Text>
         <View style={{ alignSelf: 'stretch', maxWidth: 320, marginTop: spacing.xl }}>
           <Button label="Sign in" onPress={() => router.push('/(auth)/login')} testID="profile-login-btn" />
@@ -58,13 +96,18 @@ export default function Profile() {
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          {user.avatar ? (
-            <Image source={{ uri: user.avatar }} style={styles.avatar} testID="profile-avatar-image" />
-          ) : (
-            <View style={[styles.avatar, styles.avatarInitials]} testID="profile-avatar-initials">
-              <Text style={styles.avatarInitialsText}>{initials(user.name)}</Text>
+          <Pressable onPress={changeProfilePhoto} disabled={savingPhoto} style={styles.avatarButton} testID="profile-change-avatar" accessibilityRole="button" accessibilityLabel="Change profile photo">
+            {user.avatar ? (
+              <Image source={{ uri: user.avatar }} style={styles.avatar} testID="profile-avatar-image" />
+            ) : (
+              <View style={[styles.avatar, styles.avatarInitials]} testID="profile-avatar-initials">
+                <Text style={styles.avatarInitialsText}>{initials(user.name)}</Text>
+              </View>
+            )}
+            <View style={styles.avatarEdit}>
+              {savingPhoto ? <ActivityIndicator size="small" color={c.onAccent} /> : <Ionicons name="camera" size={16} color={c.onAccent} />}
             </View>
-          )}
+          </Pressable>
           <Text style={styles.name}>{user.name || 'Athlete'}</Text>
           <Text style={styles.meta}>{[user.city, user.skill_level, 'Pickleball'].filter(Boolean).join(' · ')}</Text>
         </View>
@@ -238,11 +281,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
     paddingHorizontal: spacing.lg,
   },
-  avatar: {
-    width: 88, height: 88, borderRadius: 44,
-    backgroundColor: c.bgElevated,
-    marginBottom: spacing.md,
-  },
+  avatarButton: { position: 'relative', marginBottom: spacing.md },
+  avatar: { width: 88, height: 88, borderRadius: 44, backgroundColor: c.bgElevated },
+  avatarEdit: { position: 'absolute', right: -2, bottom: -2, width: 30, height: 30, borderRadius: 15, backgroundColor: c.accent, borderWidth: 2, borderColor: c.bg, alignItems: 'center', justifyContent: 'center' },
   avatarInitials: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border },
   avatarInitialsText: { color: c.text, fontSize: 30, fontWeight: font.weights.heavy, letterSpacing: 0.5 },
   name: {

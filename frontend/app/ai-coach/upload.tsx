@@ -22,13 +22,32 @@ export default function Upload() {
   const [stage, setStage] = useState<string>('');
 
   async function pick() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permission needed', 'Please allow access to your photos to select a match video.');
-      return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission needed', 'Please allow photo library access to select a match video.');
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        allowsMultipleSelection: false,
+        // iCloud videos must be downloaded/exported before their local URI can be uploaded.
+        shouldDownloadFromNetwork: true,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        videoExportPreset: ImagePicker.VideoExportPreset.MediumQuality,
+      });
+      if (!res.canceled && res.assets[0]) setAsset(res.assets[0]);
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      const isCloudAsset = /PHPhotosErrorDomain|3164/i.test(message);
+      Alert.alert(
+        'Could not open video',
+        isCloudAsset
+          ? 'This video is not currently available on this phone. Open it in Apple Photos, wait for the cloud download to finish, then select it again.'
+          : 'Please choose an MP4, MOV, or M4V video that is saved on this device.'
+      );
     }
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Videos, quality: 1, allowsMultipleSelection: false });
-    if (!res.canceled && res.assets[0]) setAsset(res.assets[0]);
   }
 
   async function submit() {

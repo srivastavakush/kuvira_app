@@ -7,9 +7,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { c, spacing, font, radius } from '@/src/theme';
 import { Loader, EmptyState, ScreenHeader, Button, SuccessMark } from '@/src/components/ui';
 import { api } from '@/src/api';
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
 
 export default function Cart() {
   const router = useRouter();
+  const { user } = useSession();
   const [cart, setCart] = useState<any>(null);
   const [placing, setPlacing] = useState(false);
   const [order, setOrder] = useState<any>(null);
@@ -20,6 +23,7 @@ export default function Cart() {
   async function remove(pid: string) { setCart(await api.removeFromCart(pid)); }
 
   async function checkout() {
+    if (!requireAuth(user, router, '/cart')) return;
     setPlacing(true);
     try {
       const res = await api.createOrder({ line1: '123 Court Road', city: 'Bangalore', pincode: '560001' });

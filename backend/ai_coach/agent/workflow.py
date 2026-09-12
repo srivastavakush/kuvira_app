@@ -57,10 +57,17 @@ class AgenticCoachWorkflow:
             return {"analytics": {}, "available": False, "confidence": 0.0, "reason": "video_does_not_match_analytics"}
         return {"analytics": analytics, "available": bool(analytics), "confidence": float((analytics.get("data_quality") or {}).get("overall_confidence", 0.0))}
 
-    async def retrieve_coaching_knowledge(self, query: str, sport: str = "pickleball", **_: Any) -> list[Dict[str, Any]]:
-        results = await self.retriever.retrieve(query or "sports coaching", top_k=6, filters={"sport": sport})
-        return [{"id": r.item.id, "title": r.item.title, "body": r.item.body, "source": r.item.source_name,
-                 "authority_level": r.item.authority_level, "confidence": r.item.confidence, "score": r.score} for r in results]
+    async def retrieve_coaching_knowledge(self, query: str, sport: str = "pickleball", context: Optional[Dict[str, Any]] = None, **_: Any) -> list[Dict[str, Any]]:
+        results = await self.retriever.retrieve(
+            query or "sports coaching", top_k=6, filters={"sport": sport}, context=context or {}
+        )
+        return [{
+            "id": result.item.id, "title": result.item.title, "body": result.item.body,
+            "topic": result.item.topic, "source": result.item.source_name,
+            "source_url": result.item.source_url, "source_updated_at": result.item.source_updated_at,
+            "authority_level": result.item.authority_level, "confidence": result.item.confidence,
+            "score": result.score, "citation": result.citation,
+        } for result in results]
 
     async def compare_matches(self, user_id: str, match_id: Optional[str] = None, **_: Any) -> Dict[str, Any]:
         matches = await self.get_match_history(user_id, limit=6)
@@ -108,7 +115,15 @@ class AgenticCoachWorkflow:
             "user_id": state["user_id"], "match_id": state.get("match_id"), "video_id": state.get("video_id"),
             "sport": state.get("sport", "pickleball"), "query": state.get("goal", ""),
         }
-        return {k: v for k, v in args.items() if v is not None}
+        args = {k: v for k, v in args.items() if v is not None}
+        if name == "retrieve_coaching_knowledge":
+            profile = state.get("player_context") or {}
+            args["context"] = {
+                "skill_level": profile.get("skill_level") or profile.get("level"),
+                "intent": state.get("intent"), "sport": state.get("sport"),
+                "topic": state.get("goal"),
+            }
+        return args
 
     def _record_evidence(self, state: CoachAgentState, name: str, result: Any) -> None:
         available = bool(result)
@@ -168,14 +183,15 @@ class AgenticCoachWorkflow:
             "evidence": evidence, "knowledge": state.get("knowledge", []),
             "training_history": state.get("training_history", []), "previous_recommendations": state.get("previous_recommendations", []),
             "critic": state.get("critique", {}),
-            "instructions": "Return JSON. Never invent statistics, positioning, shot/rally outcomes, tactical observations or confidence. Distinguish FACT, EVIDENCE, INFERENCE and ACTION. Player-specific claims must cite supplied evidence. If evidence is insufficient, put the limitation in unavailable and do not make the claim.",
+            "instructions": "Return JSON. Never invent statistics, positioning, shot/rally outcomes, tactical observations or confidence. Distinguish FACT, EVIDENCE, INFERENCE and ACTION. For general coaching claims use only the supplied knowledge evidence and cite its exact source ids in citations. Do not invent source ids, URLs, rules or measurements. If reliable evidence is insufficient, say so plainly in reply and unavailable.",
         }
         schema = {"title": "AgenticCoachingReport", "type": "object", "properties": {
-            "match_summary": {"type": "string"}, "data_quality_summary": {"type": "string"}, "key_takeaway": {"type": "string"},
+            "reply": {"type": "string"}, "match_summary": {"type": "string"}, "data_quality_summary": {"type": "string"}, "key_takeaway": {"type": "string"},
             "strengths": {"type": "array", "items": {"type": "string"}}, "weaknesses": {"type": "array", "items": {"type": "string"}},
             "tactical_observations": {"type": "array", "items": {"type": "string"}}, "recommended_drills": {"type": "array", "items": {"type": "object"}},
             "training_plan": {"type": "array", "items": {"type": "object"}}, "unavailable": {"type": "array", "items": {"type": "string"}},
-        }, "required": ["match_summary", "data_quality_summary", "unavailable"]}
+            "citations": {"type": "array", "items": {"type": "string"}},
+        }, "required": ["reply", "match_summary", "data_quality_summary", "unavailable", "citations"]}
         return await self.provider.generate_structured_analysis(
             system="You are Kuvira's evidence-first agentic sports coach. Use only supplied evidence. Do not fabricate.",
             user=json.dumps(prompt, default=str), schema=schema)
@@ -192,6 +208,31 @@ class AgenticCoachWorkflow:
                 if tag not in unavailable:
                     unavailable.append(tag)
         report["unavailable"] = unavailable
+        return report
+
+    @staticmethod
+    def _attach_source_citations(report: Dict[str, Any], state: CoachAgentState) -> Dict[str, Any]:
+        """Expose only citations that correspond to retrieved source records."""
+        knowledge = state.get("knowledge") or []
+        by_id = {str(item.get("id")): item for item in knowledge if item.get("id")}
+        requested = [str(value) for value in (report.get("citations") or [])]
+        valid_ids = [value for value in requested if value in by_id]
+        # Retrieval is evidence supplied to the model. If it did not select a
+        # specific id, disclose the compact evidence set rather than fabricate a
+        # claim-level citation.
+        if not valid_ids:
+            valid_ids = list(by_id)[:3]
+        report["citations"] = valid_ids
+        report["sources"] = [{
+            "id": item["id"], "title": item.get("title"), "source_name": item.get("source"),
+            "source_url": item.get("source_url"), "updated_at": item.get("source_updated_at"),
+            "topic": item.get("topic"),
+        } for item_id in valid_ids if (item := by_id.get(item_id))]
+        if not report["sources"]:
+            unavailable = list(report.get("unavailable") or [])
+            if "reliable_coaching_source_not_retrieved" not in unavailable:
+                unavailable.append("reliable_coaching_source_not_retrieved")
+            report["unavailable"] = unavailable
         return report
 
     async def run(self, *, user_id: str, goal: str = "Generate a grounded coaching report", match_id: Optional[str] = None, video_id: Optional[str] = None, sport: str = "pickleball") -> CoachAgentState:
@@ -223,7 +264,8 @@ class AgenticCoachWorkflow:
             state["done"] = True
         try:
             report = await self._synthesize(state)
-            state["final_report"] = self._apply_critic_guard(report, state.get("critique", {}))
+            report = self._apply_critic_guard(report, state.get("critique", {}))
+            state["final_report"] = self._attach_source_citations(report, state)
         except Exception as exc:
             log.exception("agent synthesis failed")
             state["final_report"] = {"match_summary": "Coach could not reach the reasoning model.", "data_quality_summary": "The evidence pipeline completed, but reasoning is unavailable.", "unavailable": ["reasoning_layer"], "error": str(exc)[:200]}

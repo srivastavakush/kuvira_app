@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Header
 from pydantic import BaseModel
-from deps import db, gen_id, current_user
+from deps import db, gen_id, current_user, require_platform_admin
 from .jobs import run_analysis_job
-from .knowledge_seed import seed_items
+from .knowledge_seed import seed_documents
 from .providers import get_default_provider
 from .retriever import get_default_retriever
 from .graph import CoachWorkflow
@@ -37,7 +37,7 @@ def _iso(): return datetime.now(timezone.utc).isoformat()
 class MatchCreateBody(BaseModel):
     sport: str = "pickleball"; player_level: Optional[str] = None; result: Optional[str] = None; opponent_name: Optional[str] = None; opponent_level: Optional[str] = None; notes: Optional[str] = None; played_at: Optional[str] = None
 class AnalyzeBody(BaseModel): match_id: str; video_id: str
-class ChatBody(BaseModel): text: str; session_id: Optional[str] = None; match_id: Optional[str] = None; video_id: Optional[str] = None
+class ChatBody(BaseModel): text: str; session_id: Optional[str] = None; match_id: Optional[str] = None; video_id: Optional[str] = None; sport: Optional[str] = None
 class GoalBody(BaseModel): title: str; target: Optional[str] = None; due_at: Optional[str] = None
 class GoalUpdateBody(BaseModel): status: str
 class TrainingOutcomeBody(BaseModel): status: str; outcome: Optional[Dict[str, Any]] = None
@@ -125,7 +125,9 @@ async def start_analysis(body: AnalyzeBody,user=Depends(current_user),idempotenc
     await db.ai_coach_jobs.insert_one(job.copy()); await db.ai_coach_matches.update_one({"id":body.match_id,"user_id":user["id"]},{"$set":{"analysis_job_id":job["id"]}})
     queue=_get_queue()
     if queue.backend == "sqs": await asyncio.to_thread(queue.enqueue, job["id"])
-    else: asyncio.create_task(run_analysis_job(db,job["id"]))
+    elif queue.backend == "local": asyncio.create_task(run_analysis_job(db,job["id"]))
+    # backend=worker is production-safe: the independently deployed worker
+    # polls the durable Mongo queue, so API instance restarts cannot lose work.
     job.pop("_id",None); return job
 
 @router.get("/analysis/{job_id}")
@@ -146,8 +148,10 @@ async def get_match_report(match_id:str,refresh:bool=False,user=Depends(current_
         if existing: return existing
     ctx=await _load_context(user["id"],match_id)
     if not ctx["match_analytics"]: raise HTTPException(409,"Analysis not complete for this match")
-    state=await _get_workflow().run({"user_id":user["id"],"match_id":match_id,**ctx}); fr=state.get("final_report") or {}
-    report={"id":gen_id(),"user_id":user["id"],"match_id":match_id,"generated_at":_iso(),**{k:fr.get(k,[]) for k in ["strengths","weaknesses","tactical_observations","recommended_drills","training_plan","unavailable"]},"match_summary":fr.get("match_summary",""),"data_quality_summary":fr.get("data_quality_summary",""),"key_takeaway":fr.get("key_takeaway",""),"metrics":ctx["match_analytics"].get("metrics",[]),"data_quality":ctx["match_analytics"].get("data_quality",{}),"evidence":state.get("retrieved_evidence",state.get("evidence",[])),"analyzer":ctx["match_analytics"].get("analyzer"),"model":os.environ.get("OPENAI_MODEL_PRIMARY","gpt-5.6-terra"),"version":"0.5.0","agent": {"intent": state.get("intent"), "plan": state.get("plan",[]), "tool_calls": state.get("tool_calls",[]), "critique": state.get("critique",{}), "replan_count": state.get("replan_count",0), "step_count": state.get("step_count",0)}}
+    metric_names=", ".join(str(metric.get("metric")) for metric in ctx["match_analytics"].get("metrics",[])[:8] if metric.get("metric"))
+    query=f"Create an evidence-grounded {match.get('sport','pickleball')} match coaching report for a {match.get('player_level') or 'player'}; consider observed metrics: {metric_names or 'none available'}."
+    state=await _get_workflow().run({"user_id":user["id"],"match_id":match_id,"sport":match.get("sport","pickleball"),"query":query,**ctx}); fr=state.get("final_report") or {}
+    report={"id":gen_id(),"user_id":user["id"],"match_id":match_id,"generated_at":_iso(),**{k:fr.get(k,[]) for k in ["strengths","weaknesses","tactical_observations","recommended_drills","training_plan","unavailable","citations","sources"]},"reply":fr.get("reply",""),"match_summary":fr.get("match_summary",""),"data_quality_summary":fr.get("data_quality_summary",""),"key_takeaway":fr.get("key_takeaway",""),"metrics":ctx["match_analytics"].get("metrics",[]),"data_quality":ctx["match_analytics"].get("data_quality",{}),"evidence":state.get("retrieved_evidence",state.get("evidence",[])),"analyzer":ctx["match_analytics"].get("analyzer"),"model":getattr(get_default_provider(),"name","unknown"),"version":"0.6.0","agent": {"intent": state.get("intent"), "plan": state.get("plan",[]), "tool_calls": state.get("tool_calls",[]), "critique": state.get("critique",{}), "replan_count": state.get("replan_count",0), "step_count": state.get("step_count",0)}}
     await db.ai_coach_reports.update_one({"match_id":match_id,"user_id":user["id"]},{"$set":report},upsert=True)
     evolution=await CoachingStateService(db).evolve_from_report(user["id"],match_id,report,ctx["match_analytics"].get("data_quality",{}))
     report["coaching_transition"]={"mutated":evolution.get("mutated",False),"reason":evolution.get("reason"),"training_assignments":evolution.get("training_assignments",[]),"state":evolution.get("state")}
@@ -184,7 +188,7 @@ async def training_outcome(training_id:str,body:TrainingOutcomeBody,user=Depends
 async def chat(body:ChatBody,user=Depends(current_user)):
     if not await _allow_chat(user["id"]): raise HTTPException(429,"Chat rate limit exceeded")
     sid=body.session_id or f"coach-{user['id']}"
-    try: result=await _get_chat_workflow().run_chat(user_id=user["id"],message=body.text,session_id=sid,match_id=body.match_id,video_id=body.video_id,sport="pickleball")
+    try: result=await _get_chat_workflow().run_chat(user_id=user["id"],message=body.text,session_id=sid,match_id=body.match_id,video_id=body.video_id,sport=body.sport or "pickleball")
     except Exception as e: log.exception("agentic chat failed"); raise HTTPException(502,f"Coach model unavailable: {str(e)[:120]}")
     return result
 
@@ -192,6 +196,13 @@ async def chat(body:ChatBody,user=Depends(current_user)):
 async def chat_history(session_id:Optional[str]=None,user=Depends(current_user)):
     sid=session_id or f"coach-{user['id']}"; msgs=await db.ai_coach_chat.find({"session_id":sid,"user_id":user["id"]},{"_id":0}).sort("created_at",1).to_list(200); return {"session_id":sid,"messages":msgs}
 
-@router.post("/knowledge/seed")
-async def knowledge_seed(user=Depends(current_user)):
-    n=await get_default_retriever(db).upsert(seed_items()); return {"upserted":n}
+@router.post("/knowledge/refresh")
+async def knowledge_refresh(user=Depends(require_platform_admin())):
+    """Refresh the curated source registry without duplicating unchanged chunks."""
+    return await get_default_retriever(db).ingest_documents(seed_documents())
+
+
+@router.post("/knowledge/seed", deprecated=True)
+async def knowledge_seed(user=Depends(require_platform_admin())):
+    """Backward-compatible alias for the versioned knowledge refresh endpoint."""
+    return await get_default_retriever(db).ingest_documents(seed_documents())

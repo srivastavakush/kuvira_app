@@ -9,7 +9,7 @@ import { confirmVerification, resendVerification } from '@/src/auth-provider';
 
 export default function OTP() {
   const router = useRouter();
-  const { mobile } = useLocalSearchParams<{ mobile: string }>();
+  const { mobile, next } = useLocalSearchParams<{ mobile: string; next?: string }>();
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
@@ -24,8 +24,8 @@ export default function OTP() {
       if (phoneNumber !== expected) throw new Error('Phone number mismatch. Please restart login.');
       const res: any = await api.otpVerify(expected, credential);
       await setToken(res.token);
-      if (!res.user.onboarded) router.replace('/(auth)/onboarding');
-      else router.replace('/(tabs)/home');
+      if (!res.user.onboarded) router.replace({ pathname: '/(auth)/onboarding', params: next ? { next } : {} });
+      else router.replace((next || '/(tabs)/home') as any);
     } catch (e: any) {
       setErr(e?.message || 'Invalid or expired OTP');
     } finally {

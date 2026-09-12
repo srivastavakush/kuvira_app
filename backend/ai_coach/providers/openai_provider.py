@@ -139,7 +139,12 @@ class OpenAIProvider(AIProvider):
                     pass
             return {"_raw": text}
 
-    async def embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
+    async def embed(
+        self,
+        texts: List[str],
+        model: Optional[str] = None,
+        purpose: str = "RETRIEVAL_DOCUMENT",
+    ) -> List[List[float]]:
         m = model or self.embedding_model
         resp = await self._with_retry(
             self._client.embeddings.create, model=m, input=texts,

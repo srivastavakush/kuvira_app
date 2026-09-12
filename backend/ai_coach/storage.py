@@ -67,7 +67,7 @@ class ObjectStorage:
                 blob = self._bucket.blob(key)
                 blob.chunk_size = 8 * 1024 * 1024
                 blob.upload_from_file(reader, rewind=False, content_type="video/mp4")
-                return {"backend": "gcs", "bucket": self.bucket, "object_key": key, "size_bytes": reader.total}
+                return {"backend": "gcs", "bucket": self.bucket, "object_key": key, "uri": f"gs://{self.bucket}/{key}", "size_bytes": reader.total}
             upload_dir = Path(os.environ.get("AI_COACH_UPLOAD_DIR", "/app/backend/uploads/videos"))
             upload_dir.mkdir(parents=True, exist_ok=True)
             path = upload_dir / f"{video_id}{extension}"
@@ -83,6 +83,17 @@ class ObjectStorage:
                 try: path.unlink()
                 except (FileNotFoundError, UnboundLocalError): pass
             raise
+
+    @staticmethod
+    def gcs_uri(storage: dict) -> str | None:
+        """Return the canonical private GCS URI for Vertex video input."""
+        if storage.get("backend") != "gcs":
+            return None
+        uri = storage.get("uri")
+        if uri:
+            return str(uri)
+        bucket, key = storage.get("bucket"), storage.get("object_key")
+        return f"gs://{bucket}/{key}" if bucket and key else None
 
     def download_to(self, storage: dict, destination: str) -> str:
         backend = storage.get("backend")

@@ -20,7 +20,7 @@ AnalyticSource = Literal[
     "player_history", "self_report", "coach_input", "unavailable",
     "yolo26", "yolo26_tracker", "yolo_pose", "court_estimator",
     "ball_track_trajectory", "ball_track_continuity", "temporal_shot_sequence",
-    "explicit_point_events",
+    "explicit_point_events", "vertex_gemini",
 ]
 
 

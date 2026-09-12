@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, TextInput, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +15,8 @@ const QUICK = [
   'Create this week’s training plan',
 ];
 
-type Msg = { role: 'user' | 'assistant'; text: string };
+type CoachSource = { id?: string; title?: string; source_name?: string; source_url?: string };
+type Msg = { role: 'user' | 'assistant'; text: string; sources?: CoachSource[] };
 
 export default function CoachChat() {
   const router = useRouter();
@@ -29,7 +30,7 @@ export default function CoachChat() {
     (async () => {
       try {
         const res: any = await api.aiCoach.history();
-        setMessages((res.messages || []).map((m: any) => ({ role: m.role, text: m.text })));
+        setMessages((res.messages || []).map((m: any) => ({ role: m.role, text: m.text, sources: m.sources })));
       } catch { /* empty state */ }
     })();
   }, []);
@@ -42,7 +43,7 @@ export default function CoachChat() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
     try {
       const res: any = await api.aiCoach.chat(text, { match_id: matchId ? String(matchId) : undefined });
-      setMessages((prev) => [...prev, { role: 'assistant', text: res.reply }]);
+      setMessages((prev) => [...prev, { role: 'assistant', text: res.reply, sources: res.sources }]);
     } catch (e: any) {
       setMessages((prev) => [...prev, { role: 'assistant', text: e?.message || "I couldn't reach the coach. Try again shortly." }]);
     } finally {
@@ -75,6 +76,17 @@ export default function CoachChat() {
             messages.map((m, i) => (
               <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.aiBubble]}>
                 <Text style={styles.bubbleText}>{m.text}</Text>
+                {m.role === 'assistant' && m.sources?.length ? (
+                  <View style={styles.sources}>
+                    <Text style={styles.sourcesLabel}>Sources</Text>
+                    {m.sources.map((source, sourceIndex) => (
+                      <Pressable key={`${source.id || source.title}-${sourceIndex}`} onPress={() => source.source_url ? Linking.openURL(source.source_url) : undefined} disabled={!source.source_url} style={styles.sourceLink}>
+                        <Ionicons name="link-outline" size={13} color={c.accent} />
+                        <Text style={styles.sourceText} numberOfLines={1}>{source.source_name || source.title || 'Coaching source'}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
               </View>
             ))
           )}
@@ -112,6 +124,10 @@ const styles = StyleSheet.create({
   userBubble: { alignSelf: 'flex-end', backgroundColor: c.bgRaised, borderBottomRightRadius: 6 },
   aiBubble: { alignSelf: 'flex-start', backgroundColor: c.bgElevated, borderBottomLeftRadius: 6 },
   bubbleText: { color: c.text, fontSize: font.sizes.base, lineHeight: 22 },
+  sources: { marginTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.divider, paddingTop: spacing.xs, gap: 4 },
+  sourcesLabel: { color: c.textFaint, fontSize: font.sizes.xs, textTransform: 'uppercase', letterSpacing: 0.8 },
+  sourceLink: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '100%' },
+  sourceText: { color: c.accent, fontSize: font.sizes.xs, textDecorationLine: 'underline', flex: 1 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.divider, backgroundColor: c.bg },
   input: { flex: 1, backgroundColor: c.bgElevated, borderRadius: radius.lg, color: c.text, fontSize: font.sizes.base, paddingHorizontal: spacing.md, paddingVertical: spacing.md, maxHeight: 120, minHeight: 44 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center' },

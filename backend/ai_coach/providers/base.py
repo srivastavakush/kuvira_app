@@ -31,4 +31,9 @@ class AIProvider(ABC):
     ) -> Dict[str, Any]: ...
 
     @abstractmethod
-    async def embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]: ...
+    async def embed(
+        self,
+        texts: List[str],
+        model: Optional[str] = None,
+        purpose: str = "RETRIEVAL_DOCUMENT",
+    ) -> List[List[float]]: ...

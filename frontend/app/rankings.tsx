@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, font, radius } from '@/src/theme';
-import { ChipRow, Loader } from '@/src/components/ui';
+import { ChipRow, Loader, Avatar } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 const SCOPES = [{ key: 'city', label: 'My City' }, { key: 'global', label: 'Global' }];
@@ -18,23 +18,30 @@ export default function Rankings() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
     (async () => {
-      const [r, a] = await Promise.all([api.rankings(scope), api.achievements()]);
-      setBoard(r.leaderboard); setAch(a); setLoading(false);
+      setLoading(true);
+      try {
+        const [r, a] = await Promise.all([api.rankings(scope), api.achievements().catch(() => null)]);
+        setBoard(r.rankings || []);
+        setAch(a);
+      } finally { setLoading(false); }
     })();
   }, [scope]);
 
   return (
-    <SafeAreaView style={styles.wrap} testID="rankings-screen">
+    <SafeAreaView style={styles.wrap} edges={['top']} testID="rankings-screen">
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} testID="rankings-back"><Ionicons name="chevron-back" size={26} color={colors.onSurface} /></Pressable>
-        <Text style={styles.title}>Rankings</Text>
-        <View style={{ width: 26 }} />
+        <Pressable onPress={() => router.back()} testID="rankings-back" hitSlop={8}>
+          <Ionicons name="arrow-back" size={24} color={colors.onSurface} />
+        </Pressable>
+        <Text style={styles.title}>Leaderboard</Text>
       </View>
-      <ChipRow items={SCOPES} active={scope} onChange={(k) => setScope(k as any)} testIDPrefix="rankings-scope" />
 
-      {loading ? <Loader /> : (
+      <ChipRow items={SCOPES} active={scope} onChange={(k) => setScope(k as any)} testIDPrefix="rank-scope" />
+
+      {loading ? (
+        <Loader />
+      ) : (
         <FlatList
           data={board}
           keyExtractor={(x) => x.id}
@@ -57,10 +64,10 @@ export default function Rankings() {
           renderItem={({ item }) => (
             <View style={[styles.row, item.is_me && styles.rowMe]} testID={`rank-row-${item.rank}`}>
               <Text style={[styles.rank, item.rank <= 3 && { color: colors.brandPrimary }]}>{item.rank}</Text>
-              <Image source={{ uri: item.avatar || 'https://i.pravatar.cc/100' }} style={styles.avatar} />
-              <View style={{ flex: 1 }}>
+              <Avatar uri={item.avatar} name={item.name} size={44} />
+              <View style={{ flex: 1, marginLeft: spacing.sm }}>
                 <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-                <Text style={styles.meta}>{item.skill_level} · {item.city || '—'}</Text>
+                <Text style={styles.meta}>{item.skill_level || 'Beginner'} · {item.city || '—'}</Text>
               </View>
               <Text style={styles.points}>{item.points}</Text>
             </View>

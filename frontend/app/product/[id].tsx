@@ -9,10 +9,13 @@ import * as Haptics from 'expo-haptics';
 import { colors, spacing, font, radius } from '@/src/theme';
 import { Loader } from '@/src/components/ui';
 import { api } from '@/src/api';
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
 
 export default function ProductDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useSession();
   const [p, setP] = useState<any>(null);
   const [added, setAdded] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -21,6 +24,7 @@ export default function ProductDetail() {
   if (!p) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
 
   async function add() {
+    if (!requireAuth(user, router, `/product/${p.id}`)) return;
     setAdding(true);
     try {
       await api.addToCart(p.id, 1);
@@ -35,7 +39,7 @@ export default function ProductDetail() {
     <View style={styles.wrap} testID="product-detail-screen">
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Image source={{ uri: p.image }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+          <Image source={{ uri: p.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
           <SafeAreaView edges={['top']}>
             <Pressable testID="product-back" onPress={() => router.back()} style={styles.backBtn}>
               <Ionicons name="chevron-back" size={24} color={colors.onSurface} />

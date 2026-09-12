@@ -38,8 +38,10 @@ class AgenticChatWorkflow(AgenticCoachWorkflow):
         )
         report = state.get("final_report", {})
         reply = report.get("reply") or report.get("key_takeaway") or report.get("match_summary") or "I need more evidence to answer that safely."
+        sources = report.get("sources") or []
+        citations = report.get("citations") or []
         now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
         sid = session_id or f"coach-{user_id}"
         await self.db.ai_coach_chat.insert_one({"session_id": sid, "user_id": user_id, "role": "user", "text": message, "match_id": match_id, "created_at": now})
-        await self.db.ai_coach_chat.insert_one({"session_id": sid, "user_id": user_id, "role": "assistant", "text": reply, "match_id": match_id, "created_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()})
-        return {"session_id": sid, "reply": reply, "match_id": match_id, "agent": state.get("agent", {}), "evidence": state.get("evidence", []), "critique": state.get("critique", {})}
+        await self.db.ai_coach_chat.insert_one({"session_id": sid, "user_id": user_id, "role": "assistant", "text": reply, "match_id": match_id, "sources": sources, "citations": citations, "created_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()})
+        return {"session_id": sid, "reply": reply, "match_id": match_id, "sources": sources, "citations": citations, "agent": state.get("agent", {}), "evidence": state.get("evidence", []), "critique": state.get("critique", {})}

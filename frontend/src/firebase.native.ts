@@ -18,6 +18,7 @@ export async function startPhoneVerification(mobile: string): Promise<void> {
 export async function confirmPhoneVerification(code: string): Promise<{ idToken: string; phoneNumber: string }> {
   if (!confirmation) throw new Error('OTP session expired. Please request a new OTP.');
   const credential = await confirmation.confirm(code.trim());
+  if (!credential || !credential.user) throw new Error('Failed to verify OTP code with Firebase.');
   const idToken = await credential.user.getIdToken(true);
   const phoneNumber = credential.user.phoneNumber;
   confirmation = null;

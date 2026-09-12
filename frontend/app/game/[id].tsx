@@ -9,6 +9,7 @@ import { colors, spacing, font, radius } from '@/src/theme';
 import { Loader } from '@/src/components/ui';
 import { api } from '@/src/api';
 import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
 
 export default function GameDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -21,6 +22,7 @@ export default function GameDetail() {
   useEffect(() => { load(); }, [id]);
 
   async function join() {
+    if (!requireAuth(user, router, `/game/${id}`)) return;
     setJoining(true);
     try { const res = await api.joinGame(String(id)); setG(res); } finally { setJoining(false); }
   }
@@ -33,8 +35,8 @@ export default function GameDetail() {
     <View style={styles.wrap} testID="game-detail-screen">
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Image source={{ uri: g.facility?.image }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-          <LinearGradient colors={['rgba(10,10,10,0.5)', 'transparent', 'rgba(10,10,10,0.95)']} locations={[0, 0.5, 1]} style={StyleSheet.absoluteFillObject} />
+          <Image source={{ uri: g.facility?.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <LinearGradient colors={['rgba(10,10,10,0.5)', 'transparent', 'rgba(10,10,10,0.95)']} locations={[0, 0.5, 1]} style={StyleSheet.absoluteFill} />
           <SafeAreaView edges={['top']}>
             <Pressable testID="game-back" onPress={() => router.back()} style={styles.backBtn}>
               <Ionicons name="chevron-back" size={24} color={colors.onSurface} />

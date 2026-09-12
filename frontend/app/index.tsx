@@ -15,8 +15,8 @@ export default function Index() {
 
   return (
     <View style={styles.wrap} testID="splash-screen">
-      <Text style={styles.brand}>KUVIRA</Text>
-      <Text style={styles.tagline}>Play with intent.</Text>
+      <Text style={styles.brand}>KUCHU PUCHU</Text>
+      <Text style={styles.tagline}>Good Games. Great People.</Text>
       <ActivityIndicator size="small" color={c.textFaint} style={{ marginTop: spacing.xl }} />
     </View>
   );

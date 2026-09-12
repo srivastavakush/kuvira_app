@@ -9,6 +9,7 @@ from typing import Callable
 from .base import VideoAnalyzer
 from .lightweight import LightweightAnalyzer
 from .yolo26_analyzer import YOLO26Analyzer
+from .vertex_gemini import VertexGeminiVideoAnalyzer
 
 _ANALYZERS: dict[str, Callable[[], VideoAnalyzer]] = {
     "pickleball": lambda: YOLO26Analyzer(),
@@ -23,6 +24,8 @@ def get_sport_analyzer(sport: str, configured: str | None = None) -> VideoAnalyz
     name = (configured or "").strip().lower()
     if name == "lightweight":
         return LightweightAnalyzer()
+    if name == "vertex_gemini":
+        return VertexGeminiVideoAnalyzer()
     if name and name != "yolo26":
         raise ValueError(f"Unsupported AI_COACH_ANALYZER: {name}")
     sport_key = (sport or "pickleball").strip().lower()

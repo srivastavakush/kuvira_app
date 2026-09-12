@@ -32,12 +32,17 @@ async def run_analysis_job(db,job_id:str)->None:
     storage=ObjectStorage(); temp_path=None
     try:
         storage_ref=video.get("storage") or {"backend":video.get("storage_backend"),"path":video.get("storage_path")}; suffix=os.path.splitext(video.get("original_filename","video.mp4"))[1] or ".mp4"
-        with tempfile.NamedTemporaryFile(prefix="kuvira-ai-coach-",suffix=suffix,delete=False) as tmp: temp_path=tmp.name
-        path=storage.download_to(storage_ref,temp_path)
         async def progress_cb(stage:str,p:float)->None: await set_stage(stage,p)
         async def execute()->Any:
             analyzer:VideoAnalyzer=get_analyzer(job.get("sport","pickleball")); await db.ai_coach_jobs.update_one({"id":job_id,"locked_by":WORKER_ID},{"$set":{"analyzer":analyzer.name,"analyzer_version":analyzer.version}})
             for stage,p in STAGES[:2]: await set_stage(stage,p)
+            gcs_uri=storage.gcs_uri(storage_ref)
+            if analyzer.name == "vertex_gemini":
+                if not gcs_uri:
+                    raise RuntimeError("vertex_gemini requires AI Coach video storage in GCS")
+                return await analyzer.analyze(gcs_uri,report_progress=progress_cb,sport=job.get("sport","pickleball"))
+            with tempfile.NamedTemporaryFile(prefix="kuvira-ai-coach-",suffix=suffix,delete=False) as tmp: temp_path=tmp.name
+            path=storage.download_to(storage_ref,temp_path)
             return await analyzer.analyze(path,report_progress=progress_cb,sport=job.get("sport","pickleball"))
         try:
             result=await AsyncRetry(attempts=int(os.environ.get("AI_COACH_JOB_RETRIES","3"))).run(execute)

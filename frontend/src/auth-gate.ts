@@ -1,5 +1,5 @@
-export function requireAuth(user: unknown, router: any, destination = '/(auth)/login') {
+export function requireAuth(user: unknown, router: any, next?: string) {
   if (user) return true;
-  router.push(destination);
+  router.push({ pathname: '/(auth)/login', params: next ? { next } : {} });
   return false;
 }

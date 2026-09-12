@@ -9,7 +9,8 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 from pymongo.errors import DuplicateKeyError
 
-from deps import db, gen_id, utcnow, strip_id, current_user, KuviraError, log
+from deps import db, gen_id, utcnow, strip_id, current_user, KuviraError, log, PAYMENT_PROVIDER
+from payments import create_checkout
 
 router = APIRouter(prefix="/api")
 
@@ -21,6 +22,7 @@ class CoachBookingCreate(BaseModel):
     coach_id: str
     date: str          # YYYY-MM-DD
     slot: str          # "18:00-19:00"
+    customer_email: Optional[str] = None
 
 
 def _coach_slots():
@@ -56,15 +58,26 @@ async def book_coach_session(body: CoachBookingCreate, user=Depends(current_user
         "date": body.date,
         "slot": body.slot,
         "price": coach["price_per_session"],   # server-side price, never from client
-        "status": "confirmed",
-        "payment": {"provider": "mock_payu", "status": "paid", "amount": coach["price_per_session"]},
+        "status": "pending_payment" if PAYMENT_PROVIDER == "payu" else "confirmed",
+        "payment": {"provider": "payu", "status": "initiated", "amount": coach["price_per_session"]} if PAYMENT_PROVIDER == "payu" else {"provider": "mock_payu", "status": "paid", "amount": coach["price_per_session"]},
         "created_at": utcnow().isoformat(),
     }
     try:
         await db.coach_sessions.insert_one(session.copy())
     except DuplicateKeyError:
         raise KuviraError(409, "SLOT_UNAVAILABLE", "This slot was just booked. Please pick another.")
-    return strip_id(session)
+    if PAYMENT_PROVIDER != "payu":
+        return strip_id(session)
+    try:
+        checkout = await create_checkout(
+            db, user=user, resource={"kind": "coach_session", "id": session["id"]}, amount=coach["price_per_session"],
+            productinfo=f"Coach session - {coach['name']}", customer_email=body.customer_email,
+        )
+        await db.coach_sessions.update_one({"id": session["id"]}, {"$set": {"payment": {**checkout["payment"], "provider": "payu"}}})
+        return {"coach_session": strip_id(session), **checkout}
+    except Exception:
+        await db.coach_sessions.delete_one({"id": session["id"], "status": "pending_payment"})
+        raise
 
 
 @router.get("/coach-sessions/mine")

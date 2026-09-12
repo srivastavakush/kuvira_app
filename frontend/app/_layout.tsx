@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useIconFonts } from '@/src/hooks/use-icon-fonts';
 import { colors } from '@/src/theme';
+import { GlobalBottomNav } from '@/src/components/navigation';
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -25,13 +26,14 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.surface }}>
       <SafeAreaProvider>
-        <StatusBar barStyle="light-content" backgroundColor={colors.surface} />
+        <StatusBar barStyle="dark-content" backgroundColor={colors.surface} />
         <View style={{ flex: 1, backgroundColor: colors.surface }}>
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface }, animation: 'fade' }}>
             <Stack.Screen name="index" />
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
           </Stack>
+          <GlobalBottomNav />
         </View>
       </SafeAreaProvider>
     </GestureHandlerRootView>

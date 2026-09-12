@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { c, spacing, font, radius } from '@/src/theme';
-import { ChipRow, Loader, ScreenHeader } from '@/src/components/ui';
+import { ChipRow, Loader, ScreenHeader, EmptyState } from '@/src/components/ui';
 import { api } from '@/src/api';
 
 const CATEGORIES = [
@@ -66,8 +66,16 @@ export default function Marketplace() {
         data={filtered}
         keyExtractor={(p) => p.id}
         numColumns={2}
-        columnWrapperStyle={{ gap: spacing.md, paddingHorizontal: spacing.lg }}
+        columnWrapperStyle={filtered.length ? { gap: spacing.md, paddingHorizontal: spacing.lg } : undefined}
         contentContainerStyle={{ paddingBottom: spacing.xxxl, gap: spacing.md }}
+        ListEmptyComponent={
+          <EmptyState
+            title="No products in this category"
+            subtitle="Check back soon for new gear additions."
+            icon="bag-outline"
+            testID="marketplace-empty"
+          />
+        }
         ListHeaderComponent={
           cat === 'all' && recommended.length ? (
             <View style={{ marginBottom: spacing.lg }}>
@@ -80,7 +88,13 @@ export default function Marketplace() {
                 contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: spacing.md }}
                 renderItem={({ item }) => (
                   <Pressable testID={`market-reco-${item.id}`} style={styles.recoCard} onPress={() => router.push(`/product/${item.id}`)}>
-                    <Image source={{ uri: item.image }} style={styles.recoImg} contentFit="cover" />
+                    {item.image ? (
+                      <Image source={{ uri: item.image }} style={styles.recoImg} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.recoImg, { alignItems: 'center', justifyContent: 'center' }]}>
+                        <Ionicons name="bag-outline" size={32} color={c.textMuted} />
+                      </View>
+                    )}
                     <Text style={styles.recoName} numberOfLines={1}>{item.name}</Text>
                     <Text style={styles.recoPrice}>₹{item.price.toLocaleString('en-IN')}</Text>
                   </Pressable>
@@ -91,16 +105,24 @@ export default function Marketplace() {
         }
         renderItem={({ item }) => (
           <Pressable testID={`market-product-${item.id}`} style={styles.card} onPress={() => router.push(`/product/${item.id}`)}>
-            <Image source={{ uri: item.image }} style={styles.cardImg} contentFit="cover" />
+            {item.image ? (
+              <Image source={{ uri: item.image }} style={styles.cardImg} contentFit="cover" />
+            ) : (
+              <View style={[styles.cardImg, { alignItems: 'center', justifyContent: 'center' }]}>
+                <Ionicons name="bag-outline" size={36} color={c.textMuted} />
+              </View>
+            )}
             <View style={styles.cardBody}>
-              <Text style={styles.brand}>{item.brand}</Text>
+              <Text style={styles.brand}>{item.category || item.brand || 'Gear'}</Text>
               <Text style={styles.name} numberOfLines={2}>{item.name}</Text>
               <View style={styles.priceRow}>
                 <Text style={styles.price}>₹{item.price.toLocaleString('en-IN')}</Text>
-                <View style={styles.ratingRow}>
-                  <Ionicons name="star" size={11} color={c.textMuted} />
-                  <Text style={styles.rating}>{item.rating}</Text>
-                </View>
+                {item.rating ? (
+                  <View style={styles.ratingRow}>
+                    <Ionicons name="star" size={11} color={c.textMuted} />
+                    <Text style={styles.rating}>{item.rating}</Text>
+                  </View>
+                ) : null}
               </View>
             </View>
           </Pressable>
