@@ -1,3 +1,5 @@
+import { Brand } from '@/src/components/brand';
+import { friendlyError } from '@/src/errors';
 import { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,7 +23,7 @@ export default function Login() {
       await startVerification(phone);
       router.push({ pathname: '/(auth)/otp', params: { mobile: phone, next } });
     } catch (e: any) {
-      setErr(e?.message || 'Failed to send OTP');
+      setErr(friendlyError(e, 'Could not send your code. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -29,10 +31,10 @@ export default function Login() {
 
   return (
     <View style={styles.wrap} testID="login-screen">
-      <SafeAreaView style={{ flex: 1 }}>
+      <SafeAreaView edges={[]} style={{ flex: 1 }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={styles.brandWrap}>
-            <Text style={styles.brand}>KUCHU{`\n`}PUCHU</Text>
+            <Brand />
             <Text style={styles.tagline}>GOOD GAMES. GREAT PEOPLE.</Text>
           </View>
           <View style={styles.form}>
@@ -41,9 +43,11 @@ export default function Login() {
             <View style={styles.inputRow}>
               <Text style={styles.cc}>+91</Text>
               <TextInput
+                accessibilityLabel="Indian mobile number"
+                autoComplete="tel"
                 testID="login-mobile-input"
                 value={mobile}
-                onChangeText={setMobile}
+                onChangeText={value => setMobile(value.replace(/\D/g, ''))}
                 keyboardType="phone-pad"
                 placeholder="Mobile number"
                 placeholderTextColor={colors.onSurfaceMuted}
@@ -53,8 +57,8 @@ export default function Login() {
             </View>
             {err ? <Text testID="login-error" style={styles.err}>{err}</Text> : null}
             <View style={{ height: spacing.lg }} />
-            <Button label="Send OTP" onPress={submit} loading={loading} testID="login-send-otp-button" />
-            <Text style={styles.terms}>By continuing you agree to Kuchu Puchu’s Terms & Privacy.</Text>
+            <Button label="Send OTP" onPress={submit} loading={loading} disabled={!/^[6-9]\d{9}$/.test(mobile)} testID="login-send-otp-button" />
+            <Text style={styles.terms}>By continuing you agree to MatchDrome’s Terms & Privacy.</Text>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -64,7 +68,7 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.surface },
-  brandWrap: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: spacing.xl, paddingBottom: spacing.xl },
+  brandWrap: { paddingTop: spacing.xl, justifyContent: 'center', paddingHorizontal: spacing.xl, paddingBottom: spacing.xl },
   brand: { color: colors.onSurface, fontSize: 44, fontWeight: '800', letterSpacing: 6 },
   tagline: { color: colors.onSurfaceSecondary, fontSize: font.sizes.sm, marginTop: spacing.xs, letterSpacing: 1.6, textTransform: 'uppercase' as const },
   form: { padding: spacing.xl, backgroundColor: colors.surfaceSecondary, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, borderTopWidth: 1, borderColor: colors.border },

@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { Brand } from '@/src/components/brand';
+import { SportPicker } from '@/src/components/sport-picker';
+import { Button } from '@/src/components/ui';
+import { useEffect, useState, useRef } from 'react';
 import { Alert, TextInput, View, Text, ScrollView, StyleSheet, Pressable, Switch, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -16,6 +19,8 @@ export default function ClubWorkspace() {
   const router = useRouter();
   const { capabilities, loading: capsLoading, roleForOrg, canForOrg } = useCapabilities();
 
+  const loadVersion = useRef(0);
+  const [selectedSport, setSelectedSport] = useState('badminton');
   const [tab, setTab] = useState<TabKey>('overview');
   const [org, setOrg] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
@@ -72,24 +77,28 @@ export default function ClubWorkspace() {
   const canAnalytics = canForOrg(currentOrgId, 'club.analytics.view');
 
   const reloadAll = async () => {
+    const version = ++loadVersion.current;
+    setErr(null);
     try {
-      const o = await api.org(currentOrgId);
-      setOrg(o);
-      if (canAnalytics) api.orgAnalytics(currentOrgId).then(setAnalytics).catch(() => {});
-      api.orgFacilities(currentOrgId).then((facs) => {
-        setFacilities(facs);
-        if (facs.length > 0 && !selectedFacilityId) setSelectedFacilityId(facs[0].id);
-      }).catch(() => {});
-      if (canBookingsManage) api.orgBookings(currentOrgId).then(setBookings).catch(() => {});
-      if (canStaff) api.orgMembers(currentOrgId).then(setMembers).catch(() => {});
-      if (canEventsManage) {
-        api.orgEvents(currentOrgId).then(setEvents).catch(() => {});
-        api.orgTournaments(currentOrgId).then(setTournaments).catch(() => {});
-      }
-      if (canManageClub) api.orgAuditLog(currentOrgId).then((res) => setAuditLogs(res?.entries || [])).catch(() => {});
-    } catch (e: any) {
-      setErr(e.message || 'Access denied');
-    }
+      const results = await Promise.allSettled([
+        api.org(currentOrgId), canAnalytics ? api.orgAnalytics(currentOrgId) : Promise.resolve(null),
+        api.orgFacilities(currentOrgId), canBookingsManage ? api.orgBookings(currentOrgId) : Promise.resolve([]),
+        canStaff ? api.orgMembers(currentOrgId) : Promise.resolve([]),
+        canEventsManage ? api.orgEvents(currentOrgId) : Promise.resolve([]),
+        canEventsManage ? api.orgTournaments(currentOrgId) : Promise.resolve([]),
+        canManageClub ? api.orgAuditLog(currentOrgId) : Promise.resolve({ entries: [] }),
+      ]);
+      if (version !== loadVersion.current) return;
+      const setters = [setOrg, setAnalytics, setFacilities, setBookings, setMembers, setEvents, setTournaments];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          if (index < 7) setters[index](result.value);
+          else setAuditLogs(result.value?.entries || []);
+        }
+      });
+      if (results[2].status === 'fulfilled' && results[2].value?.length && !selectedFacilityId) setSelectedFacilityId(results[2].value[0].id);
+      if (results.some(r => r.status === 'rejected')) setErr('Some club data couldn’t load. Please retry before making changes.');
+    } catch (e: any) { if (version === loadVersion.current) setErr(e.message || 'Club unavailable'); }
   };
 
   useEffect(() => {
@@ -98,7 +107,9 @@ export default function ClubWorkspace() {
       setErr('You do not have access to this club workspace.');
       return;
     }
+    setOrg(null); setFacilities([]); setBookings([]); setMembers([]); setEvents([]); setTournaments([]); setAnalytics(null); setSelectedFacilityId(''); setShowAddCourt(false); setShowAddEvent(false); setTab('overview');
     reloadAll();
+    return () => { loadVersion.current++; };
   }, [currentOrgId, capsLoading, canView]);
 
   useEffect(() => {
@@ -120,7 +131,7 @@ export default function ClubWorkspace() {
         area: newCourtArea.trim() || org?.city || 'Downtown',
         courts_count: parseInt(newCourtCount) || 1,
         price_per_hour: parseInt(newCourtPrice) || 600,
-        sports: ['sport-pickleball'],
+        sports: [`sport-${selectedSport}`],
       });
       setShowAddCourt(false);
       setNewCourtName('');
@@ -209,7 +220,7 @@ export default function ClubWorkspace() {
         date: `${eventDate}T10:00:00Z`,
         price: parseInt(eventPrice) || 0,
         type: eventType,
-        sport: 'sport-pickleball',
+        sport: `sport-${selectedSport}`,
         status: eventStatus,
         facility_id: selectedFacilityId || undefined,
       });
@@ -284,7 +295,7 @@ export default function ClubWorkspace() {
           <Text style={styles.title}>Club</Text>
           <View style={{ width: 26 }} />
         </View>
-        <Text style={{ color: colors.error, padding: spacing.lg }}>{err}</Text>
+        <Text style={{ color: colors.error, padding: spacing.lg }}>{err}</Text>{canView && <Button label="Try again" onPress={reloadAll} />}
       </SafeAreaView>
     );
   }
@@ -301,6 +312,7 @@ export default function ClubWorkspace() {
         <View style={{ width: 26 }} />
       </View>
 
+      <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}><Brand compact /><Text style={{ color: colors.onSurfaceSecondary, marginTop: 8 }}>Active club: {org.name} · Changes apply to this club only.</Text></View>
       {/* Workspace Badge */}
       <View style={styles.badgeRow}>
         <View style={styles.workspaceBadge}>
@@ -335,13 +347,14 @@ export default function ClubWorkspace() {
           <>
             {canAnalytics && analytics && (
               <View style={styles.grid}>
-                <Metric label="Revenue" value={`₹${(analytics.revenue || 0).toLocaleString('en-IN')}`} icon="cash" />
+                {canManageClub && <Metric label="Confirmed booking value" value={`₹${(analytics.revenue || 0).toLocaleString('en-IN')}`} icon="cash" />}
                 <Metric label="Bookings" value={analytics.bookings_count || 0} icon="calendar" />
                 <Metric label="Courts" value={facilities.length} icon="grid" />
                 <Metric label="Team" value={members.length} icon="people" />
               </View>
             )}
-            <Text style={styles.sectionH}>Quick Actions</Text>
+            <Text style={styles.sectionH}>{canManageClub ? 'Club operations' : 'Today at the venue'}</Text>
+            {!canManageClub && <View style={styles.grid}><Metric label="Today’s bookings" value={bookings.filter(b => b.date === new Date().toLocaleDateString('en-CA')).length} icon="calendar" /><Metric label="Courts" value={facilities.length} icon="grid" /></View>}
             <View style={styles.quickGrid}>
               {canCourtsCreate && (
                 <Pressable onPress={() => setShowAddCourt(true)} style={styles.actionTile}>
@@ -640,7 +653,7 @@ export default function ClubWorkspace() {
       <Modal visible={showAddCourt} transparent animationType="slide">
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add New Court</Text>
+            <Text style={styles.modalTitle}>Add New Court</Text><SportPicker value={selectedSport} onChange={setSelectedSport} />
             <TextInput placeholder="Court Name (e.g. Center Court)" placeholderTextColor={colors.onSurfaceMuted} value={newCourtName} onChangeText={setNewCourtName} style={styles.input} />
             <TextInput placeholder="Area/Location (e.g. Koramangala)" placeholderTextColor={colors.onSurfaceMuted} value={newCourtArea} onChangeText={setNewCourtArea} style={styles.input} />
             <TextInput placeholder="Number of courts (e.g. 2)" placeholderTextColor={colors.onSurfaceMuted} value={newCourtCount} onChangeText={setNewCourtCount} keyboardType="numeric" style={styles.input} />
@@ -657,7 +670,7 @@ export default function ClubWorkspace() {
       <Modal visible={showAddEvent} transparent animationType="slide">
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Create Event</Text>
+            <Text style={styles.modalTitle}>Create Event</Text><SportPicker value={selectedSport} onChange={setSelectedSport} />
             <TextInput placeholder="Event Name" placeholderTextColor={colors.onSurfaceMuted} value={eventName} onChangeText={setEventName} style={styles.input} />
             <TextInput placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.onSurfaceMuted} value={eventDate} onChangeText={setEventDate} style={styles.input} />
             <TextInput placeholder="Price ₹" placeholderTextColor={colors.onSurfaceMuted} value={eventPrice} onChangeText={setEventPrice} keyboardType="numeric" style={styles.input} />

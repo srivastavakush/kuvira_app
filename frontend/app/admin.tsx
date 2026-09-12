@@ -1,3 +1,6 @@
+import { AdminOverview } from '@/src/components/admin-overview';
+import { SportPicker } from '@/src/components/sport-picker';
+import { sportName } from '@/src/sports';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View, Modal, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,13 +13,14 @@ import { EmptyState, Loader } from '@/src/components/ui';
 import { api } from '@/src/api';
 import { useSession } from '@/src/session';
 
-type AdminTab = 'clubs' | 'events' | 'tournaments' | 'products';
+type AdminTab = 'overview' | 'clubs' | 'events' | 'tournaments' | 'products';
 
 export default function AdminDashboard() {
   const router = useRouter();
   const { user, capabilities, refresh } = useSession();
-  const [tab, setTab] = useState<AdminTab>('clubs');
+  const [tab, setTab] = useState<AdminTab>('overview');
   const [loading, setLoading] = useState(true);
+  const [selectedSport, setSelectedSport] = useState('badminton');
   const [busy, setBusy] = useState(false);
 
   // Clubs & Facilities
@@ -190,7 +194,7 @@ export default function AdminDashboard() {
         courts_count: Number(courtsCount) || 1,
         price_per_hour: Number(pricePerHour) || 600,
         image: facilityImage.trim() || undefined,
-        sports: ['sport-pickleball'],
+        sports: [`sport-${selectedSport}`],
       };
       if (editingFacility) {
         await api.adminUpdateFacility(selectedClub.id, editingFacility.id, payload);
@@ -239,7 +243,7 @@ export default function AdminDashboard() {
         name: eventName.trim(),
         date: `${eventDate}T10:00:00Z`,
         type: eventType,
-        sport: 'sport-pickleball',
+        sport: `sport-${selectedSport}`,
         price: Number(eventPrice) || 0,
         image: eventImage.trim() || undefined,
         status: eventStatus,
@@ -289,7 +293,7 @@ export default function AdminDashboard() {
         name: tournName.trim(),
         date: `${tournDate}T09:00:00Z`,
         format: tournFormat,
-        sport: 'sport-pickleball',
+        sport: `sport-${selectedSport}`,
         entry_fee: Number(tournEntryFee) || 0,
         prize_pool: Number(tournPrizePool) || 0,
         image: tournImage.trim() || undefined,
@@ -341,7 +345,7 @@ export default function AdminDashboard() {
       const payload = {
         name: prodName.trim(),
         category: prodCategory.trim(),
-        sport: 'sport-pickleball',
+        sport: `sport-${selectedSport}`,
         price: Number(prodPrice) || 0,
         stock: Number(prodStock) || 0,
         image: prodImage.trim() || undefined,
@@ -393,7 +397,7 @@ export default function AdminDashboard() {
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={styles.eyebrow}>PLATFORM ADMIN</Text>
-            <Text style={styles.heading}>Kuchu Puchu Management</Text>
+            <Text style={styles.heading}>MatchDrome Management</Text>
           </View>
           <View style={styles.adminBadge}>
             <Ionicons name="shield-checkmark" size={18} color={colors.brandPrimary} />
@@ -403,6 +407,7 @@ export default function AdminDashboard() {
 
         {/* Tab Pills */}
         <View style={styles.tabContainer}>
+          <Pressable accessibilityRole="button" onPress={() => setTab('overview')} style={[styles.tabBtn, tab === 'overview' && styles.tabBtnActive]}><Text style={[styles.tabBtnText, tab === 'overview' && styles.tabBtnTextActive]}>Overview</Text></Pressable>
           <Pressable onPress={() => setTab('clubs')} style={[styles.tabBtn, tab === 'clubs' && styles.tabBtnActive]}>
             <Ionicons name="business-outline" size={16} color={tab === 'clubs' ? colors.onBrandPrimary : colors.onSurfaceMuted} />
             <Text style={[styles.tabBtnText, tab === 'clubs' && styles.tabBtnTextActive]}>Clubs & Courts ({clubs.length})</Text>
@@ -424,6 +429,7 @@ export default function AdminDashboard() {
         {/* Main Content Area */}
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
+          {tab === 'overview' && <AdminOverview />}
           {/* TAB 1: CLUBS & COURTS */}
           {tab === 'clubs' && (
             <>
@@ -506,7 +512,7 @@ export default function AdminDashboard() {
                           </View>
                           <Pressable
                             onPress={() => {
-                              setEditingFacility(f);
+                              setEditingFacility(f); setSelectedSport(sportName(f.sport || f.sports?.[0] || 'badminton').toLowerCase());
                               setFacilityName(f.name);
                               setFacilityCity(f.city);
                               setFacilityArea(f.area);
@@ -575,7 +581,7 @@ export default function AdminDashboard() {
                       </View>
                       <Pressable
                         onPress={() => {
-                          setEditingEvent(e);
+                          setEditingEvent(e); setSelectedSport(sportName(e.sport || e.sports?.[0] || 'badminton').toLowerCase());
                           setEventName(e.name);
                           setEventDate(e.date?.slice(0, 10) || '');
                           setEventType(e.type || 'Social Mixer');
@@ -643,7 +649,7 @@ export default function AdminDashboard() {
                       </View>
                       <Pressable
                         onPress={() => {
-                          setEditingTourn(t);
+                          setEditingTourn(t); setSelectedSport(sportName(t.sport || t.sports?.[0] || 'badminton').toLowerCase());
                           setTournName(t.name);
                           setTournDate(t.date?.slice(0, 10) || '');
                           setTournFormat(t.format || 'Double Elimination');
@@ -712,7 +718,7 @@ export default function AdminDashboard() {
                       </View>
                       <Pressable
                         onPress={() => {
-                          setEditingProduct(p);
+                          setEditingProduct(p); setSelectedSport(sportName(p.sport || p.sports?.[0] || 'badminton').toLowerCase());
                           setProdName(p.name);
                           setProdCategory(p.category || 'Paddles');
                           setProdPrice(String(p.price || 0));
@@ -746,7 +752,7 @@ export default function AdminDashboard() {
               <Pressable onPress={() => setShowClubModal(false)}><Ionicons name="close" size={22} color={colors.onSurfaceMuted} /></Pressable>
             </View>
             <Text style={styles.inputLabel}>Club Name</Text>
-            <TextInput placeholder="e.g. Bangalore Pickleball Club" placeholderTextColor={colors.onSurfaceMuted} value={clubName} onChangeText={setClubName} style={styles.input} />
+            <TextInput placeholder="e.g. Bangalore Sports Club" placeholderTextColor={colors.onSurfaceMuted} value={clubName} onChangeText={setClubName} style={styles.input} />
             <Text style={styles.inputLabel}>City</Text>
             <TextInput placeholder="e.g. Bangalore" placeholderTextColor={colors.onSurfaceMuted} value={clubCity} onChangeText={setClubCity} style={styles.input} />
             <Text style={styles.inputLabel}>Owner Mobile (optional)</Text>
@@ -765,7 +771,7 @@ export default function AdminDashboard() {
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{editingFacility ? 'Edit Court' : 'Add Court'}</Text>
+                <View style={{ flex: 1 }}><Text style={styles.modalTitle}>{editingFacility ? 'Edit Court' : 'Add Court'}</Text><SportPicker value={selectedSport} onChange={setSelectedSport} /></View>
                 <Pressable onPress={() => setShowCourtModal(false)}><Ionicons name="close" size={22} color={colors.onSurfaceMuted} /></Pressable>
               </View>
               <Text style={styles.inputLabel}>Court / Venue Name</Text>
@@ -808,7 +814,7 @@ export default function AdminDashboard() {
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{editingEvent ? 'Edit Event' : 'Create Event'}</Text>
+                <View style={{ flex: 1 }}><Text style={styles.modalTitle}>{editingEvent ? 'Edit Event' : 'Create Event'}</Text><SportPicker value={selectedSport} onChange={setSelectedSport} /></View>
                 <Pressable onPress={() => setShowEventModal(false)}><Ionicons name="close" size={22} color={colors.onSurfaceMuted} /></Pressable>
               </View>
               <Text style={styles.inputLabel}>Event Name</Text>
@@ -849,7 +855,7 @@ export default function AdminDashboard() {
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{editingTourn ? 'Edit Tournament' : 'Create Tournament'}</Text>
+                <View style={{ flex: 1 }}><Text style={styles.modalTitle}>{editingTourn ? 'Edit Tournament' : 'Create Tournament'}</Text><SportPicker value={selectedSport} onChange={setSelectedSport} /></View>
                 <Pressable onPress={() => setShowTournModal(false)}><Ionicons name="close" size={22} color={colors.onSurfaceMuted} /></Pressable>
               </View>
               <Text style={styles.inputLabel}>Tournament Name</Text>
@@ -898,7 +904,7 @@ export default function AdminDashboard() {
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{editingProduct ? 'Edit Product' : 'Add Product'}</Text>
+                <View style={{ flex: 1 }}><Text style={styles.modalTitle}>{editingProduct ? 'Edit Product' : 'Add Product'}</Text><SportPicker value={selectedSport} onChange={setSelectedSport} /></View>
                 <Pressable onPress={() => setShowProductModal(false)}><Ionicons name="close" size={22} color={colors.onSurfaceMuted} /></Pressable>
               </View>
               <Text style={styles.inputLabel}>Product Name</Text>
@@ -1020,7 +1026,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceSecondary, marginRight: spacing.sm },
+  backBtn: { width: 44, height: 44, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceSecondary, marginRight: spacing.sm },
   eyebrow: { color: colors.brandPrimary, fontSize: font.sizes.xs, fontWeight: '800', letterSpacing: 1.5 },
   heading: { color: colors.onSurface, fontSize: font.sizes.xl, fontWeight: '900' },
   adminBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.brandTertiary, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.brandSecondary },
@@ -1063,7 +1069,7 @@ const styles = StyleSheet.create({
   rowTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
   facilityRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   itemThumb: { width: 48, height: 48, borderRadius: radius.sm, backgroundColor: colors.surfaceTertiary },
-  actionIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
+  actionIcon: { width: 44, height: 44, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border },
   inputLabel: { color: colors.onSurface, fontSize: font.sizes.xs, fontWeight: '700', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
   input: { backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, color: colors.onSurface, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, marginBottom: spacing.md, fontSize: font.sizes.sm },
   twoCol: { flexDirection: 'row', gap: spacing.md },

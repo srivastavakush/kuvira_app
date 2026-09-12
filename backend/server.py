@@ -1,4 +1,4 @@
-"""Kuchu Puchu — backend API.
+"""MatchDrome — backend API.
 
 MVP scope:
 - Mobile+OTP auth (mock: any number, OTP=123456), JWT
@@ -41,7 +41,7 @@ PLATFORM_ADMIN_MOBILES = [m.strip() for m in os.environ.get("PLATFORM_ADMIN_MOBI
 
 configure_logging()
 
-app = FastAPI(title="Kuchu Puchu API")
+app = FastAPI(title="MatchDrome API")
 api = APIRouter(prefix="/api")
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @api.get("/")
 async def root():
-    return {"app": "Kuchu Puchu", "status": "ok", "env": APP_ENV}
+    return {"app": "MatchDrome", "status": "ok", "env": APP_ENV}
 
 @api.get("/health")
 async def health():
@@ -433,6 +433,12 @@ async def list_facilities(city: Optional[str] = None, sport: Optional[str] = Non
     if sport:
         q["sports"] = sport
     items = await db.facilities.find(q, {"_id": 0}).to_list(200)
+    org_ids = list({item.get("org_id") for item in items if item.get("org_id")})
+    orgs = await db.organizations.find({"id": {"$in": org_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    names = {org["id"]: org.get("name") for org in orgs}
+    for item in items:
+        if item.get("org_id") in names:
+            item["org_name"] = names[item["org_id"]]
     return items
 
 @api.get("/facilities/{fid}")
@@ -584,7 +590,7 @@ async def _payu_callback_response(request: Request):
     form = await request.form()
     result = await process_callback(db, {str(key): str(value) for key, value in form.items()})
     status = result["payment"]["status"]
-    return HTMLResponse(f"<html><body><h2>Payment {html.escape(status)}</h2><p>You may return to Kuchu Puchu.</p></body></html>")
+    return HTMLResponse(f"<html><body><h2>Payment {html.escape(status)}</h2><p>You may return to MatchDrome.</p></body></html>")
 
 
 @api.post("/payments/payu/return")
@@ -659,20 +665,21 @@ def _match_score(player: dict, user: dict) -> int:
     return max(20,min(99,score))
 
 @api.get("/players")
-async def list_players(user=Depends(current_user)):
+async def list_players(user=Depends(optional_user)):
     """Return real onboarded users as player cards for 'Players Near You'.
-    Excludes demo players from seed data. Falls back to demo if DB is empty."""
+    Guest-safe public profile fields only; excludes demonstration data."""
     real_users = await db.users.find(
-        {"onboarded": True, "id": {"$ne": user["id"]}},
+        {"onboarded": True, "is_demo": {"$ne": True}, "id": {"$ne": user["id"] if user else None}},
         {"_id": 0, "id": 1, "name": 1, "avatar": 1, "city": 1, "state": 1,
          "area": 1, "primary_sport": 1, "skill_level": 1, "bio": 1,
-         "playing_style": 1, "location": 1, "lat": 1, "lng": 1}
+         "playing_style": 1, "sports": 1}
     ).to_list(200)
     for p in real_users:
-        p["match_score"] = _match_score(p, user)
+        if user:
+            p["match_score"] = _match_score(p, user)
         p["matches_played"] = await db.games.count_documents({"current_players": p["id"]})
         p["is_real_user"] = True
-    real_users.sort(key=lambda x: -x["match_score"])
+    real_users.sort(key=lambda x: -x.get("match_score", 0))
     return real_users
 @api.get("/players/{pid}")
 async def get_player(pid: str, user=Depends(optional_user)):
@@ -683,7 +690,7 @@ async def get_player(pid: str, user=Depends(optional_user)):
         raise HTTPException(404, "Player not found")
     if user:
         p["match_score"] = _match_score(p, user)
-    return p
+    return {key: value for key, value in p.items() if key in {"id", "name", "avatar", "city", "area", "primary_sport", "sports", "skill_level", "bio", "playing_style", "match_score", "matches_played", "availability"}}
 
 @api.get("/coaches")
 async def list_coaches(city:Optional[str]=None): return await db.coaches.find({'city':city, 'is_demo': {'$ne': True}} if city else {'is_demo': {'$ne': True}},{'_id':0}).to_list(100)
@@ -698,12 +705,12 @@ async def list_events(city: Optional[str] = None, published_only: bool = True):
     q: Dict[str, Any] = {}
     if city: q["city"] = city
     q["is_demo"] = {"$ne": True}
-    if published_only: q["status"] = "published"
+    q["status"] = "published"
     return await db.events.find(q, {'_id': 0}).sort('date', 1).to_list(100)
 
 @api.get('/events/{eid}')
 async def get_event(eid: str):
-    e = await db.events.find_one({'id': eid, 'is_demo': {'$ne': True}}, {'_id': 0})
+    e = await db.events.find_one({'id': eid, 'is_demo': {'$ne': True}, 'status': 'published'}, {'_id': 0})
     if not e: raise HTTPException(404, 'Event not found')
     return e
 
@@ -713,11 +720,11 @@ async def list_tournaments(city: Optional[str] = None, published_only: bool = Tr
     q: Dict[str, Any] = {}
     if city: q["city"] = city
     q["is_demo"] = {"$ne": True}
-    if published_only: q["status"] = "published"
+    q["status"] = "published"
     return await db.tournaments.find(q, {'_id': 0}).sort('date', 1).to_list(100)
 @api.get('/tournaments/{tid}')
 async def get_tournament(tid:str):
-    t=await db.tournaments.find_one({'id':tid, 'is_demo': {'$ne': True}},{'_id':0});
+    t=await db.tournaments.find_one({'id':tid, 'is_demo': {'$ne': True}, 'status': 'published'},{'_id':0});
     if not t: raise HTTPException(404,'Tournament not found')
     return t
 @api.post('/tournaments/{tid}/register')
@@ -809,7 +816,7 @@ async def create_order(body: OrderCreate, user=Depends(current_user)):
         await db.carts.update_one({'user_id':user['id']},{'$set':{'items':[]}})
         return strip_id(order)
     try:
-        checkout = await create_checkout(db, user=user, resource={'kind': 'order', 'id': order['id']}, amount=total, productinfo=f"Kuchu Puchu order ({len(line_items)} item{'s' if len(line_items) != 1 else ''})", customer_email=body.customer_email)
+        checkout = await create_checkout(db, user=user, resource={'kind': 'order', 'id': order['id']}, amount=total, productinfo=f"MatchDrome order ({len(line_items)} item{'s' if len(line_items) != 1 else ''})", customer_email=body.customer_email)
         await db.orders.update_one({'id': order['id']}, {'$set': {'payment': {**checkout['payment'], 'provider': 'payu'}}})
         return {'order': strip_id(order), **checkout}
     except Exception:
@@ -818,7 +825,7 @@ async def create_order(body: OrderCreate, user=Depends(current_user)):
 @api.get('/orders/mine')
 async def my_orders(user=Depends(current_user)): return await db.orders.find({'user_id':user['id']},{'_id':0}).sort('created_at',-1).to_list(100)
 
-AI_COACH_SYSTEM = """You are Kuchu Puchu AI Coach — a world-class multi-sport coach for badminton, cricket, football, tennis and pickleball.
+AI_COACH_SYSTEM = """You are MatchDrome AI Coach — a world-class multi-sport coach for badminton, cricket, football, tennis and pickleball.
 
 You know the player's profile: sport, skill level, city, playing style, goals.
 Be concise (2-4 short paragraphs max), specific, and actionable.

@@ -1,8 +1,9 @@
+import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { c, spacing, font, radius } from '@/src/theme';
 import { ChipRow, Loader, EmptyState, MatchScoreBadge, Badge, Avatar } from '@/src/components/ui';
@@ -25,9 +26,12 @@ const SKILL_FILTERS = [
 
 export default function Play() {
   const router = useRouter();
+  const { tab: requestedTab } = useLocalSearchParams<{ tab?: string }>();
   const { user } = useSession();
-  const [tab, setTab] = useState('games');
+  const [tab, setTab] = useState(requestedTab || 'games');
+  useEffect(() => { if (requestedTab) setTab(requestedTab); }, [requestedTab]);
   const [skill, setSkill] = useState('all');
+  const [loadError, setLoadError] = useState<unknown>();
   const [games, setGames] = useState<any[]>([]);
   const [players, setPlayers] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -35,14 +39,12 @@ export default function Play() {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      const [g, p, b] = await Promise.all([
-        api.games(skill !== 'all' ? { skill } : {}).catch(() => []),
-        api.players().catch(() => []),
-        user ? api.myBookings().catch(() => []) : Promise.resolve([]),
-      ]);
-      setGames(g); setPlayers(p); setBookings(b);
-    } finally { setLoading(false); }
+    setLoadError(null);
+    const results = await Promise.allSettled([api.games(skill !== 'all' ? { skill } : {}), api.players(), user ? api.myBookings() : Promise.resolve([])]);
+    const setters = [setGames, setPlayers, setBookings];
+    results.forEach((r, i) => { if (r.status === 'fulfilled' && Array.isArray(r.value)) setters[i](r.value); });
+    if (results.some(r => r.status === 'rejected')) setLoadError('Some games or players couldn’t load. Try again.');
+    setLoading(false);
   }, [skill, user]);
 
   useEffect(() => { setLoading(true); load(); }, [load]);
@@ -52,7 +54,7 @@ export default function Play() {
 
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="play-screen">
-      <View style={styles.header}>
+      <ErrorBanner error={loadError} retry={load} /><View style={styles.header}>
         <Text style={styles.title}>Play</Text>
         <Pressable
           testID="play-create-game"

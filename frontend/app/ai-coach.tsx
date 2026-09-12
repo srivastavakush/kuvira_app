@@ -1,3 +1,4 @@
+import { ErrorBanner, SkeletonCards } from '@/src/components/states';
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,20 +13,23 @@ import { requireAuth } from '@/src/auth-gate';
 export default function AICoachHub() {
   const router = useRouter();
   const { user } = useSession();
+  const [error, setError] = useState<unknown>();
   const [matches, setMatches] = useState<any[]>([]);
   const [perf, setPerf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    if (!user) { setMatches([]); setPerf(null); setLoading(false); return; }
+    setError(null);
     try {
       const [m, p] = await Promise.all([
-        api.aiCoach.listMatches().catch(() => []),
+        api.aiCoach.listMatches(),
         api.aiCoach.playerPerformance().catch(() => null),
       ]);
       setMatches(m); setPerf(p);
-    } finally { setLoading(false); }
-  }, []);
+    } catch(e) { setError(e); } finally { setLoading(false); }
+  }, [user?.id]);
 
   useEffect(() => { load(); }, [load]);
   async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
@@ -37,7 +41,7 @@ export default function AICoachHub() {
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="ai-coach-hub">
       <ScreenHeader
-        title="Kuchu Puchu AI Coach"
+        title="MatchDrome AI Coach"
         onBack={() => router.back()}
         right={level ? <Badge label={level} variant="neutral" size="sm" /> : undefined}
       />
@@ -46,11 +50,12 @@ export default function AICoachHub() {
         contentContainerStyle={{ paddingBottom: spacing.xxxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.textFaint} />}
       >
+        <ErrorBanner error={error} retry={load} />
         {/* Primary CTA */}
         <View style={styles.primary}>
           <Text style={styles.primaryEyebrow}>★ YOUR GAME, LEVELLED UP</Text>
           <Text style={styles.primaryTitle}>Turn a match video into your next big move.</Text>
-          <Text style={styles.primarySub}>Upload footage of your match. We’ll produce structured, evidence-based analysis you can train against.</Text>
+          <Text style={styles.primarySub}>Badminton, cricket, football, tennis, pickleball, padel and basketball. Choose your sport, level and goal. Results depend on footage quality and the models available.</Text>
           <View style={{ marginTop: spacing.lg }}>
             <Button label="Analyze a match" onPress={upload} testID="ai-coach-analyze" />
           </View>
@@ -60,7 +65,7 @@ export default function AICoachHub() {
         {latest ? (
           <Pressable
             testID="ai-coach-recent-match"
-            onPress={() => router.push(latest.report ? `/ai-coach/report/${latest.id}` : `/ai-coach/analyzing/${latest.job?.id || ''}?matchId=${latest.id}`)}
+            onPress={() => router.push(latest.report ? `/ai-coach/report/${latest.id}` : latest.job?.id ? `/ai-coach/analyzing/${latest.job.id}?matchId=${latest.id}` : '/ai-coach/upload')}
             style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.bgRaised }]}
           >
             <View style={styles.rowIcon}>
@@ -83,16 +88,16 @@ export default function AICoachHub() {
         {/* Secondary entry points */}
         <View style={styles.menuBlock}>
           <View style={styles.menuGroup}>
-            <MenuRow icon="stats-chart-outline" label="Performance trends" sub={perf?.matches_analyzed ? `${perf.matches_analyzed} match${perf.matches_analyzed === 1 ? '' : 'es'} analyzed` : 'No analyzed matches yet'} onPress={() => router.push('/ai-coach/performance')} />
+            <MenuRow icon="stats-chart-outline" label="Performance trends" sub={perf?.matches_analyzed ? `${perf.matches_analyzed} match${perf.matches_analyzed === 1 ? '' : 'es'} analyzed` : 'No analyzed matches yet'} onPress={() => { if (requireAuth(user, router, '/ai-coach/performance')) router.push('/ai-coach/performance'); }} />
             <Divider inset={spacing.md} />
-            <MenuRow icon="barbell-outline" label="Training plan" sub={latest?.report ? 'Latest plan available' : 'Available after your first analysis'} onPress={() => latest?.report ? router.push(`/ai-coach/report/${latest.id}?tab=training`) : router.push('/ai-coach/upload')} />
+            <MenuRow icon="barbell-outline" label="Training plan" sub={latest?.report ? 'Latest plan available' : 'Available after your first analysis'} onPress={() => latest?.report ? router.push(`/ai-coach/report/${latest.id}?tab=training`) : upload()} />
             <Divider inset={spacing.md} />
-            <MenuRow icon="chatbubble-ellipses-outline" label="Ask the coach" sub="Grounded in your latest match" onPress={() => router.push('/ai-coach/chat')} />
+            <MenuRow icon="chatbubble-ellipses-outline" label="Ask the coach" sub="Grounded in your latest match" onPress={() => { if (requireAuth(user, router, '/ai-coach/chat')) router.push('/ai-coach/chat'); }} />
           </View>
         </View>
 
         {/* Match list */}
-        {loading ? null : matches.length === 0 ? (
+        {loading ? <SkeletonCards /> : matches.length === 0 ? (
           <EmptyState
             title="No analyzed matches yet"
             subtitle="Upload your first match video to see structured coaching."
@@ -110,7 +115,7 @@ export default function AICoachHub() {
                   {i > 0 ? <Divider inset={spacing.md} /> : null}
                   <Pressable
                     testID={`ai-coach-match-${m.id}`}
-                    onPress={() => router.push(m.report ? `/ai-coach/report/${m.id}` : `/ai-coach/analyzing/${m.job?.id || ''}?matchId=${m.id}`)}
+                    onPress={() => router.push(m.report ? `/ai-coach/report/${m.id}` : m.job?.id ? `/ai-coach/analyzing/${m.job.id}?matchId=${m.id}` : '/ai-coach/upload')}
                     style={({ pressed }) => [styles.matchRow, pressed && { backgroundColor: c.bgRaised }]}
                   >
                     <View style={{ flex: 1 }}>

@@ -48,6 +48,7 @@ export default function TabsLayout() {
           ),
         }}
       />
+      <Tabs.Screen name="activity" options={{ title: 'Activity' }} />
       <Tabs.Screen
         name="profile"
         options={{

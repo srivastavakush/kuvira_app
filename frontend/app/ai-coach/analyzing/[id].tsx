@@ -1,3 +1,4 @@
+import { friendlyError } from '@/src/errors';
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,12 +22,13 @@ const STAGE_LABELS: Record<string, string> = {
 export default function Analyzing() {
   const { id, matchId } = useLocalSearchParams<{ id: string; matchId: string }>();
   const router = useRouter();
+  const [retry, setRetry] = useState(0);
   const [job, setJob] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<any>(null);
 
   useEffect(() => {
-    let alive = true;
+    let alive = true; setError(null);
     async function poll() {
       try {
         const j: any = await api.aiCoach.analysisStatus(String(id));
@@ -36,7 +38,7 @@ export default function Analyzing() {
           router.replace(`/ai-coach/report/${matchId || j.match_id}`);
           return;
         }
-        if (j.status === 'failed') { setError(j.error || 'Analysis failed'); return; }
+        if (j.status === 'failed') { setError(friendlyError(j.error, 'The analysis couldn’t finish. Please try another video.')); return; }
       } catch (e: any) {
         if (!alive) return; setError(e?.message || 'Could not fetch job status');
         return;
@@ -45,10 +47,10 @@ export default function Analyzing() {
     }
     poll();
     return () => { alive = false; if (timer.current) clearTimeout(timer.current); };
-  }, [id, matchId, router]);
+  }, [id, matchId, router, retry]);
 
   const stage = job?.stage || 'queued';
-  const progress = Math.round(((job?.progress ?? 0) as number) * 100);
+  const progress = Math.min(100, Math.max(0, Math.round(Number(job?.progress || 0) * 100)));
 
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="ai-coach-analyzing">
@@ -62,10 +64,10 @@ export default function Analyzing() {
 
         {error ? (
           <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Analysis failed</Text>
+            <Text style={styles.errorTitle}>{job?.status === 'failed' ? 'Analysis couldn’t finish' : 'Status temporarily unavailable'}</Text>
             <Text style={styles.errorText}>{error}</Text>
             <View style={{ marginTop: spacing.lg, alignSelf: 'stretch' }}>
-              <Button label="Back to Coach" variant="secondary" onPress={() => router.replace('/ai-coach')} />
+              <Button label="Retry status" onPress={() => setRetry(v => v + 1)} /><Button label="Back to Coach" variant="secondary" onPress={() => router.replace('/ai-coach')} />
             </View>
           </View>
         ) : (
@@ -80,7 +82,7 @@ export default function Analyzing() {
             </View>
             <View style={styles.note}>
               <ActivityIndicator size="small" color={c.textFaint} />
-              <Text style={styles.noteText}>Phase 1 analyzer runs on video metadata and motion only. Shot-level analytics arrive when trained CV models are enabled.</Text>
+              <Text style={styles.noteText}>You can leave this screen and revisit the report from AI Coach. Results will explain what could be measured and where the footage or model limits confidence.</Text>
             </View>
           </>
         )}

@@ -1,3 +1,6 @@
+import { ErrorBanner } from '@/src/components/states';
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +21,9 @@ function nextDates(n: number) {
 export default function CoachDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useSession();
+  const [error, setError] = useState<unknown>();
+  const [retry, setRetry] = useState(0);
   const [coach, setCoach] = useState<any>(null);
   const [dates] = useState(nextDates(7));
   const [dateIdx, setDateIdx] = useState(0);
@@ -27,15 +33,17 @@ export default function CoachDetail() {
   const [confirmed, setConfirmed] = useState<any>(null);
 
   const dateStr = dates[dateIdx].toISOString().slice(0, 10);
-  useEffect(() => { (async () => setCoach(await api.coach(String(id))))(); }, [id]);
-  useEffect(() => { setSlot(null); (async () => setAvail(await api.coachAvailability(String(id), dateStr)))(); }, [id, dateStr]);
+  useEffect(() => { api.coach(String(id)).then(setCoach).catch(setError); }, [id, retry]);
+  useEffect(() => { setSlot(null); setAvail(null); api.coachAvailability(String(id), dateStr).then(setAvail).catch(setError); }, [id, dateStr, retry]);
 
-  async function book() {
+  async function book(authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => book(true))) return;
     if (!slot) return;
     setBooking(true);
-    try { setConfirmed(await api.bookCoachSession(String(id), dateStr, slot)); } finally { setBooking(false); }
+    try { setConfirmed(await api.bookCoachSession(String(id), dateStr, slot)); } catch(e) { setError(e); } finally { setBooking(false); }
   }
 
+  if (error) return <SafeAreaView style={{ flex: 1 }}><ErrorBanner error={error} retry={() => { setError(null); setRetry(v => v + 1); }} /></SafeAreaView>;
   if (!coach || !avail) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
 
   if (confirmed) {
@@ -101,7 +109,7 @@ export default function CoachDetail() {
 
       <View style={styles.footer}>
         <View><Text style={styles.price}>₹{coach.price_per_session}</Text><Text style={styles.priceSub}>{slot ? `${dateStr} · ${slot}` : 'Select a slot'}</Text></View>
-        <Pressable testID="coach-book-btn" disabled={!slot || booking} style={[styles.bookBtn, (!slot || booking) && { opacity: 0.5 }]} onPress={book}>
+        <Pressable testID="coach-book-btn" disabled={!slot || booking} style={[styles.bookBtn, (!slot || booking) && { opacity: 0.5 }]} onPress={() => book()}>
           <Text style={styles.bookText}>{booking ? 'Processing…' : 'Book & Pay'}</Text>
         </Pressable>
       </View>
@@ -116,7 +124,7 @@ const styles = StyleSheet.create({
   heroBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg },
   avatar: { width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: colors.brandPrimary, marginBottom: spacing.sm },
   name: { color: colors.onSurface, fontSize: font.sizes.xxxl, fontWeight: '900' },
-  meta: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, marginTop: 4 },
+  meta: { color: '#E6EDF3', fontSize: font.sizes.base, marginTop: 4 },
   body: { padding: spacing.lg },
   bio: { color: colors.onSurfaceSecondary, fontSize: font.sizes.base, lineHeight: 22 },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },

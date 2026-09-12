@@ -1,3 +1,6 @@
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
+import { friendlyError } from '@/src/errors';
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TextInput, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +23,7 @@ type Msg = { role: 'user' | 'assistant'; text: string; sources?: CoachSource[] }
 
 export default function CoachChat() {
   const router = useRouter();
+  const { user } = useSession();
   const { matchId } = useLocalSearchParams<{ matchId?: string }>();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
@@ -35,7 +39,8 @@ export default function CoachChat() {
     })();
   }, []);
 
-  async function send(text: string) {
+  async function send(text: string, authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => send(text, true))) return;
     if (!text.trim() || sending) return;
     setInput('');
     setMessages((prev) => [...prev, { role: 'user', text }]);
@@ -45,7 +50,8 @@ export default function CoachChat() {
       const res: any = await api.aiCoach.chat(text, { match_id: matchId ? String(matchId) : undefined });
       setMessages((prev) => [...prev, { role: 'assistant', text: res.reply, sources: res.sources }]);
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: 'assistant', text: e?.message || "I couldn't reach the coach. Try again shortly." }]);
+      setMessages((prev) => [...prev, { role: 'assistant', text: friendlyError(e, "I couldn't reach the coach. Try again shortly.") }]);
+      setInput(text);
     } finally {
       setSending(false);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);

@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Kuchu Puchu",
+    "name": "MatchDrome",
     "slug": "kuchu-puchu",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "kuchupuchu",
-    "userInterfaceStyle": "automatic",
+    "scheme": ["kuchupuchu", "matchdrome"],
+    "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.kuvirasportsapp.zwrxyl"
@@ -28,7 +28,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Kuchu Puchu uses your photo library only when you choose a profile photo or match video."
+          "photosPermission": "MatchDrome uses your photo library only when you choose a profile photo or match video."
         }
       ],
       [

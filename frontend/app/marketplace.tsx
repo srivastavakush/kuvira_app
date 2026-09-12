@@ -1,3 +1,4 @@
+import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,6 +12,8 @@ import { api } from '@/src/api';
 const CATEGORIES = [
   { key: 'all', label: 'All' },
   { key: 'Paddles', label: 'Paddles' },
+  { key: 'Rackets', label: 'Rackets' },
+  { key: 'Bats', label: 'Bats' },
   { key: 'Shoes', label: 'Shoes' },
   { key: 'Balls', label: 'Balls' },
   { key: 'Bags', label: 'Bags' },
@@ -19,6 +22,8 @@ const CATEGORIES = [
 
 export default function Marketplace() {
   const router = useRouter();
+  const [error, setError] = useState<unknown>();
+  const [retry, setRetry] = useState(0);
   const [cat, setCat] = useState('all');
   const [products, setProducts] = useState<any[]>([]);
   const [recommended, setRecommended] = useState<any[]>([]);
@@ -30,9 +35,9 @@ export default function Marketplace() {
       try {
         const [p, r] = await Promise.all([api.products(), api.recommendedProducts().catch(() => [])]);
         setProducts(p); setRecommended(r);
-      } finally { setLoading(false); }
+      } catch(e) { setError(e); } finally { setLoading(false); }
     })();
-  }, []);
+  }, [retry]);
 
   useFocusEffect(useCallback(() => {
     api.cart().then((c: any) => setCartCount(c.count || 0)).catch(() => {});
@@ -44,6 +49,7 @@ export default function Marketplace() {
 
   return (
     <SafeAreaView style={styles.wrap} edges={['top']} testID="marketplace-screen">
+      <ErrorBanner error={error} retry={() => { setError(null); setLoading(true); setRetry(v => v + 1); }} />
       <ScreenHeader
         title="Shop"
         onBack={() => router.back()}

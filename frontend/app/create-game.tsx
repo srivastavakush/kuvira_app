@@ -1,3 +1,8 @@
+import { SportPicker } from '@/src/components/sport-picker';
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
+import { ErrorBanner } from '@/src/components/states';
+import { EmptyState, InputField } from '@/src/components/ui';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +18,12 @@ const TIMES = ['Morning', 'Afternoon', 'Evening'];
 
 export default function CreateGame() {
   const router = useRouter();
+  const { user } = useSession();
+  const [sport, setSport] = useState('badminton');
+  const [day, setDay] = useState('');
+  const [time, setTime] = useState('18:00');
+  const [error, setError] = useState<unknown>();
+  const [loading, setLoading] = useState(true);
   const [facilities, setFacilities] = useState<any[]>([]);
   const [facilityId, setFacilityId] = useState<string>('');
   const [skill, setSkill] = useState('Intermediate');
@@ -22,25 +33,28 @@ export default function CreateGame() {
   const [notes, setNotes] = useState('');
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    (async () => { const f = await api.facilities(); setFacilities(f); if (f[0]) setFacilityId(f[0].id); })();
-  }, []);
+  async function load() { setLoading(true); setError(null); try { const f = await api.facilities(); setFacilities(f); if (f[0]) setFacilityId(f[0].id); } catch(e) { setError(e); } finally { setLoading(false); } }
+  useEffect(() => { load(); }, []);
 
-  async function create() {
+  async function create(authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => create(true))) return;
     if (!facilityId) return;
     setCreating(true);
     try {
-      const date = new Date(); date.setDate(date.getDate() + 1); date.setHours(18, 0, 0, 0);
+      const date = new Date(`${day}T${time}:00+05:30`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time) || !Number.isFinite(date.getTime()) || date <= new Date()) throw new Error('Choose a future date and time in Indian Standard Time.');
+      if (!Number.isFinite(Number(price)) || Number(price) < 0) throw new Error('Enter a valid price per player.');
       const g = await api.createGame({
-        sport: 'sport-pickleball', facility_id: facilityId, date: date.toISOString(),
+        sport: `sport-${sport}`, facility_id: facilityId, date: date.toISOString(),
         duration_min: 90, skill_level: skill, format, max_players: maxPlayers,
-        price_per_person: parseInt(price) || 200, notes,
+        price_per_person: Number(price), notes,
       });
       router.replace(`/game/${g.id}`);
-    } finally { setCreating(false); }
+    } catch(e) { setError(e); } finally { setCreating(false); }
   }
 
-  if (!facilities.length) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
+  if (!loading && !facilities.length) return <SafeAreaView style={{ flex: 1 }}><ErrorBanner error={error} retry={load} /><EmptyState title="No venues available yet" subtitle="Explore venues or try again shortly." cta="Explore" onCta={() => router.push('/(tabs)/discover')} /></SafeAreaView>;
+  if (loading) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
 
   return (
     <SafeAreaView style={styles.wrap} testID="create-game-screen">
@@ -51,7 +65,7 @@ export default function CreateGame() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
-        <Text style={styles.label}>Facility</Text>
+        <ErrorBanner error={error} /><SportPicker value={sport} onChange={setSport} /><InputField label="Date (YYYY-MM-DD)" value={day} onChangeText={setDay} placeholder="YYYY-MM-DD" /><InputField label="Time (24-hour, IST)" value={time} onChangeText={setTime} placeholder="18:00" /><Text style={styles.label}>Facility</Text>
         {facilities.map((f) => (
           <Pressable key={f.id} testID={`create-facility-${f.id}`} onPress={() => setFacilityId(f.id)} style={[styles.optRow, facilityId === f.id && styles.optRowActive]}>
             <Text style={[styles.optRowText, facilityId === f.id && styles.optTextActive]}>{f.name}</Text>
@@ -94,7 +108,7 @@ export default function CreateGame() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable testID="create-game-submit" disabled={creating} style={[styles.submitBtn, creating && { opacity: 0.6 }]} onPress={create}>
+        <Pressable testID="create-game-submit" disabled={creating} style={[styles.submitBtn, creating && { opacity: 0.6 }]} onPress={() => create()}>
           <Text style={styles.submitBtnText}>{creating ? 'Creating…' : 'Create Game'}</Text>
         </Pressable>
       </View>

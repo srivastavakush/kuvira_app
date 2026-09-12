@@ -30,7 +30,7 @@ export default function RootLayout() {
         <View style={{ flex: 1, backgroundColor: colors.surface }}>
           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.surface }, animation: 'fade' }}>
             <Stack.Screen name="index" />
-            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(auth)" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
             <Stack.Screen name="(tabs)" />
           </Stack>
           <GlobalBottomNav />

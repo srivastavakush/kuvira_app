@@ -1,9 +1,9 @@
-// Unified phone-auth provider for Kuchu Puchu.
+// Unified phone-auth provider for MatchDrome.
 //
-// Kuchu Puchu supports two auth modes, selected by EXPO_PUBLIC_AUTH_MODE:
+// MatchDrome supports two auth modes, selected by EXPO_PUBLIC_AUTH_MODE:
 //   - "firebase" (production): Firebase Phone Authentication sends & verifies
 //     the SMS, and the resulting Firebase ID token is exchanged with the
-//     backend for a Kuchu Puchu JWT. Requires a native/dev build (Firebase native
+//     backend for a MatchDrome JWT. Requires a native/dev build (Firebase native
 //     module is unavailable in Expo Go).
 //   - "mock" (preview/dev, default): the backend issues a deterministic OTP
 //     (123456) so the full app is usable in Expo Go and the web preview.

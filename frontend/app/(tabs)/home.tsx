@@ -1,136 +1,111 @@
-import { useCallback, useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet as NativeStyleSheet, Pressable, RefreshControl } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, Pressable, RefreshControl, useWindowDimensions, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { c, elevation, font, radius, spacing } from '@/src/theme';
+import { c, radius, elevation } from '@/src/theme';
 import { api } from '@/src/api';
 import { useSession } from '@/src/session';
-import { Avatar, Loader } from '@/src/components/ui';
+import { Brand } from '@/src/components/brand';
+import { Avatar, Button, EmptyState } from '@/src/components/ui';
+import { ErrorBanner, SkeletonCards } from '@/src/components/states';
+import { SPORTS, sportsLabel, money, dateLabel } from '@/src/sports';
+import { FavoriteButton } from '@/src/components/favorite';
 
-const StyleSheet = Object.assign(NativeStyleSheet, { absoluteFillObject: NativeStyleSheet.absoluteFill });
-
-const CREW = require('../../assets/images/brand/kuchu-puchu-crew.png');
-const MASCOTS = require('../../assets/images/brand/kuchu-puchu-mascots-sticker.png');
-const ACTIONS = [
-  { label: 'Book a\nCourt', icon: 'tennisball-outline' as const, color: c.lime, to: '/(tabs)/discover' },
-  { label: 'Find\nPlayers', icon: 'people-outline' as const, color: '#FFB9DD', to: '/(tabs)/play' },
-  { label: 'Play\nTournaments', icon: 'trophy-outline' as const, color: c.yellow, to: '/(tabs)/discover' },
-  { label: "What's\nHappening", icon: 'calendar-outline' as const, color: c.purple, to: '/(tabs)/discover' },
-  { label: 'Gear Up', icon: 'bag-handle-outline' as const, color: c.blue, to: '/marketplace' },
-  { label: 'Ask AI\nCoach', icon: 'sparkles-outline' as const, color: '#FFC2E2', to: '/ai-coach' },
-];
-const SPORTS = [
-  { name: 'Badminton', icon: '🏸', color: c.lime }, { name: 'Cricket', icon: '🏏', color: c.yellow },
-  { name: 'Football', icon: '⚽', color: c.blue }, { name: 'Tennis', icon: '🎾', color: c.purple }, { name: 'Pickleball', icon: '◉', color: '#FFB9DD' },
-];
-const PLAYER_VIBES = [
-  { sport: 'Badminton', status: 'Looking for a rally', color: c.lime }, { sport: 'Football', status: 'Game on tonight', color: c.blue },
-  { sport: 'Tennis', status: 'Ready to play', color: c.yellow }, { sport: 'Cricket', status: 'Weekend squad?', color: c.accentSoft },
-  { sport: 'Pickleball', status: 'Dink partner wanted', color: c.purple }, { sport: 'Badminton', status: 'Let’s go!', color: c.lime },
-];
-
-function dateLabel(value: string) {
-  const d = new Date(value);
-  return { day: String(d.getDate()), month: d.toLocaleString('en', { month: 'short' }).toUpperCase() };
-}
-function sportFor(index: number) { return SPORTS[index % SPORTS.length].name; }
+const SHORTCUTS = [
+  { label: 'Book a Court', icon: 'tennisball-outline', color: '#E1FFD2', path: '/(tabs)/discover?category=facilities' },
+  { label: 'Find Players', icon: 'people-outline', color: '#FFE0ED', path: '/(tabs)/play?tab=players' },
+  { label: 'Play Tournaments', icon: 'trophy-outline', color: '#FFF1AA', path: '/(tabs)/discover?category=tournaments' },
+  { label: 'What’s Happening', icon: 'calendar-outline', color: '#E9E0FF', path: '/(tabs)/discover?category=events' },
+  { label: 'Gear Up', icon: 'bag-handle-outline', color: '#DBECFF', path: '/marketplace' },
+  { label: 'Ask AI Coach', icon: 'sparkles-outline', color: '#FFE1EF', path: '/ai-coach' },
+] as const;
+type Feed = Record<'facilities' | 'events' | 'players' | 'tournaments' | 'games' | 'products', any[]>;
+const EMPTY: Feed = { facilities: [], events: [], players: [], tournaments: [], games: [], products: [] };
 
 export default function Home() {
   const router = useRouter();
   const { user } = useSession();
-  const [data, setData] = useState<any>();
+  const { width } = useWindowDimensions();
+  const wide = width >= 768;
+  const [data, setData] = useState<Feed>(EMPTY);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [city, setCity] = useState('');
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [cities, setCities] = useState<string[]>([]);
+  const [cityError, setCityError] = useState<unknown>();
   const load = useCallback(async () => {
-    const [facilities, events, players, tournaments] = await Promise.all([
-      api.facilities().catch(() => []), api.events().catch(() => []), api.players().catch(() => []), api.tournaments().catch(() => []),
-    ]);
-    setData({ facilities: facilities.slice(0, 5), events: events.slice(0, 4), players: players.slice(0, 7), tournaments: tournaments.slice(0, 3) });
-  }, []);
+    const results = await Promise.allSettled([api.facilities(city ? { city } : {}), api.events(city ? { city } : undefined), api.players(), api.tournaments(city ? { city } : undefined), api.games(city ? { city } : {}), api.products()]);
+    const keys = Object.keys(EMPTY) as (keyof Feed)[];
+    const failed: string[] = [];
+    const updates: Partial<Feed> = {};
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) updates[keys[index]] = result.value;
+        else failed.push(keys[index]);
+      });
+    setData(previous => ({ ...previous, ...updates }));
+    setErrors(failed); setLoading(false); setRefreshing(false);
+  }, [city]);
   useEffect(() => { load(); }, [load]);
-  async function refresh() { setRefreshing(true); await load(); setRefreshing(false); }
-  if (!data) return <SafeAreaView style={styles.wrap}><Loader /></SafeAreaView>;
-
-  return <SafeAreaView style={styles.wrap} edges={['top']} testID="home-screen">
-    <ScrollView showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.accent} />} contentContainerStyle={styles.content}>
-      <View style={[styles.header, mobileStyles.header]}>
-        <View style={mobileStyles.wordmark} accessibilityLabel="Kuchu Puchu">
-          <Text style={mobileStyles.wordmarkKuchu}>KUCHU</Text><Text style={mobileStyles.wordmarkPuchu}>PUCHU</Text><Ionicons name="sparkles" size={12} color={c.lime} style={mobileStyles.wordmarkSpark} />
-        </View>
-        <Pressable onPress={() => router.push('/(tabs)/discover')} style={styles.location}><Ionicons name="location" color={c.accent} size={17}/><Text style={styles.locationText}>{user?.city || 'Delhi NCR'}</Text><Ionicons name="chevron-down" color={c.text} size={15}/></Pressable>
-        <Pressable onPress={() => router.push('/(tabs)/discover')} style={styles.headerCircle}><Ionicons name="search-outline" color={c.text} size={20}/></Pressable>
-        <Pressable onPress={() => router.push('/(tabs)/profile')} style={styles.headerCircle}><Ionicons name="notifications-outline" color={c.text} size={20}/><View style={styles.noticeDot}/></Pressable>
-        <Pressable onPress={() => router.push('/(tabs)/profile')} style={styles.profileDot}><Ionicons name="person-outline" color={c.text} size={20}/><View style={styles.onlineDot}/></Pressable>
-      </View>
-
-      <Pressable onPress={() => router.push('/(tabs)/discover')} style={styles.search} testID="home-search-btn"><Ionicons name="search-outline" color={c.text} size={22}/><Text style={styles.searchText}>Search courts, players, events...</Text><Ionicons name="options-outline" color={c.text} size={21}/></Pressable>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRail}>
-        {ACTIONS.map((item) => <Pressable key={item.label} onPress={() => router.push(item.to as any)} style={styles.action} testID={`home-quick-${item.label.replace(/\W/g, '')}`}><View style={[styles.actionIcon, { backgroundColor: item.color }]}><Ionicons name={item.icon} color={c.text} size={30}/></View><Text style={styles.actionLabel}>{item.label}</Text><View style={[styles.actionArrow, { backgroundColor: item.color }]}><Ionicons name="arrow-forward" color={c.text} size={16}/></View></Pressable>)}
-      </ScrollView>
-
-      <Pressable onPress={() => router.push('/(tabs)/play')} style={[styles.hero, mobileStyles.hero]} testID="home-hero">
-        <Image source={CREW} style={styles.heroImage} contentFit="cover" />
-        <View style={styles.heroShade}/><Image source={MASCOTS} style={styles.heroMascots} contentFit="contain"/><Text style={styles.zap}>⚡</Text><View style={styles.heroCopy}><Text style={styles.heroEyebrow}>★ DELHI PLAYS DIFFERENT</Text><Text style={styles.heroTitle}>GAME ON?</Text><Text style={styles.heroNote}>Find your squad{`\n`}in the city.</Text><View style={styles.heroButton}><Text style={styles.heroButtonText}>Explore now</Text><Ionicons name="arrow-forward" color={c.onAccent} size={18}/></View></View>
+  async function openLocation() {
+    setLocationOpen(true); setCityError(null);
+    try { const list = await api.cities(); setCities((Array.isArray(list) ? list : list?.cities || []).map((x: any) => typeof x === 'string' ? x : x.name || x.city).filter(Boolean)); }
+    catch (e) { setCityError(e); }
+  }
+  function navigate(path: string) { router.push(path as any); }
+  const cardWidth = wide ? (Math.min(width, 1200) - 64) / 3 : Math.min(width - 52, 320);
+  function Rail({ children }: { children: React.ReactNode }) {
+    return wide ? <View style={s.grid}>{children}</View> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.rail}>{children}</ScrollView>;
+  }
+  function empty(key: keyof Feed, title: string) { return data[key].length ? null : <EmptyState title={errors.includes(key) ? 'Taking a timeout' : title} subtitle={errors.includes(key) ? 'We couldn’t load this section. Please try again.' : 'Explore another area or check back for new activity.'} cta={errors.includes(key) ? 'Try again' : undefined} onCta={load} icon={errors.includes(key) ? 'cloud-offline-outline' : 'tennisball-outline'} />; }
+  const clubs = data.facilities.filter((f, i, all) => f.org_name && all.findIndex(x => x.org_id === f.org_id) === i);
+  return <SafeAreaView edges={['top']} style={s.wrap} testID="home-screen">
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.page} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}>
+      <View style={s.header}><View style={{ flex: 1, gap: 5 }}><Brand /><Pressable accessibilityRole="button" accessibilityLabel="Choose location" onPress={openLocation} style={s.location}><Ionicons name="location" size={16} color={c.accent} /><Text style={s.meta}>{city || 'Explore India'}</Text><Ionicons name="chevron-down" size={14} color={c.text} /></Pressable></View><Pressable accessibilityRole="button" accessibilityLabel="Notifications and activity" onPress={() => navigate('/(tabs)/activity')} style={s.iconButton}><Ionicons name="notifications-outline" size={24} color={c.text} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => navigate('/(tabs)/profile')} style={s.iconButton}><Avatar uri={user?.avatar || undefined} name={user?.name || 'Player'} size={42} /></Pressable></View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Search courts, players and events" onPress={() => navigate('/(tabs)/discover')} style={s.search}><Ionicons name="search-outline" size={23} color={c.text} /><Text style={[s.meta, { flex: 1 }]}>Search courts, players, events</Text><Ionicons name="options-outline" size={22} color={c.text} /></Pressable>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.shortcuts}>{SHORTCUTS.map(item => <Pressable key={item.label} accessibilityRole="button" onPress={() => navigate(item.path)} style={[s.shortcut, { backgroundColor: item.color }]}><Ionicons name={item.icon} size={30} color={c.text} /><Text style={s.shortcutText}>{item.label}</Text></Pressable>)}</ScrollView>
+      <Pressable accessibilityRole="button" accessibilityLabel="Game On? Find your squad" onPress={() => navigate('/(tabs)/play')} style={s.hero}>
+        <Image source={{ uri: 'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?auto=format&fit=crop&w=1400&q=85' }} style={StyleSheet.absoluteFill} contentFit="cover" accessibilityLabel="Tennis court" />
+        <LinearGradient colors={['rgba(8,28,43,0.96)', 'rgba(8,28,43,0.45)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+        <View style={s.heroBody}><Text style={s.eyebrow}>GOOD GAMES. GREAT PEOPLE.</Text><Text style={s.heroTitle}>Game On?</Text><Text style={s.heroSub}>Find your game.{`\n`}Find your people.</Text><View style={s.heroCta}><Text style={s.heroCtaText}>Find Your Squad</Text><Ionicons name="arrow-forward" size={20} color={c.text} /></View></View>
+        {wide && <Text style={s.heroSticker}>SAME SPORT.{`\n`}MORE PEOPLE. ↗</Text>}
       </Pressable>
-
-      <Header title="Popular Near You" icon="location" action="See all" onPress={() => router.push('/(tabs)/discover')} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-        {data.facilities.map((f: any, index: number) => <Pressable key={f.id} style={styles.facility} onPress={() => router.push(`/facility/${f.id}`)} testID={`home-facility-${f.id}`}>
-          {f.image ? <Image source={{ uri: f.image }} style={styles.facilityImage} contentFit="cover"/> : <View style={[styles.facilityImage, { backgroundColor: c.lime }]} />}
-          <View style={[styles.distance, { backgroundColor: index % 2 ? c.blue : c.lime }]}><Text style={styles.distanceText}>{(2.1 + index * 1.3).toFixed(1)} km</Text></View>
-          <Text style={styles.facilityTitle} numberOfLines={1}>{f.name}</Text><Text style={styles.facilityMeta}><Ionicons name="location-outline" size={11} /> {f.area || f.city}</Text>
-          <View style={styles.tagRow}><Text style={styles.sportTag}>{sportFor(index)}</Text><Text style={styles.sportTag}>{SPORTS[(index + 2) % SPORTS.length].name}</Text><Text style={[styles.openTag, { backgroundColor: index % 3 === 2 ? '#FFF1A5' : '#D5FFE1' }]}>{index % 3 === 2 ? 'Few slots left' : 'Open now'}</Text></View>
-        </Pressable>)}
-      </ScrollView>
-
-      <Header title="What’s Happening" icon="flame" action="See all" onPress={() => router.push('/(tabs)/discover')} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-        {data.events.map((event: any, index: number) => { const date = dateLabel(event.date); return <Pressable key={event.id} style={styles.event} onPress={() => router.push('/(tabs)/discover')} testID={`home-event-${event.id}`}>
-          {event.image ? <Image source={{ uri: event.image }} style={styles.eventImage} contentFit="cover"/> : <View style={[styles.eventImage, { backgroundColor: index % 2 ? c.lime : c.yellow }]} />}
-          <View style={[styles.eventDoodle, { backgroundColor: SPORTS[index % SPORTS.length].color }]}><Text style={styles.eventDoodleText}>{sportFor(index)}</Text></View><View style={styles.date}><Text style={styles.dateDay}>{date.day}</Text><Text style={styles.dateMonth}>{date.month}</Text></View>
-          <View style={styles.eventBody}><Text style={styles.eventName} numberOfLines={1}>{event.name}</Text><Text style={styles.eventMeta}>{event.city || 'Delhi NCR'} · {new Date(event.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text><View style={styles.eventFoot}><Text style={styles.eventLevel}>All levels · {event.participants_count || 12} playing</Text><View style={styles.join}><Text style={styles.joinText}>Let’s go!</Text></View></View></View>
-        </Pressable>; })}
-      </ScrollView>
-
-      <Header title="Who’s Playing?" icon="people" action="Find your squad" onPress={() => router.push('/(tabs)/play')} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.players}>
-        {data.players.map((player: any, index: number) => { const vibe = PLAYER_VIBES[index % PLAYER_VIBES.length]; return <Pressable key={player.id} style={styles.player} onPress={() => router.push(`/player/${player.id}`)}><View style={[styles.avatarRing, { borderColor: vibe.color }]}><Avatar uri={player.avatar} name={player.name} size={52}/><View style={[styles.playerOnline, { backgroundColor: vibe.color }]} /></View><Text style={styles.playerName} numberOfLines={1}>{player.name}</Text><Text style={styles.playerSport}>{vibe.sport}</Text><Text style={styles.playerKm}>{index + 2} km</Text></Pressable>; })}
-      </ScrollView>
-
-      {data.tournaments.length > 0 && <><Header title="Play Tournaments" icon="trophy" action="See all" onPress={() => router.push('/(tabs)/discover')} /><View style={styles.tournamentList}>{data.tournaments.map((t: any, i: number) => <Pressable key={t.id} onPress={() => router.push('/(tabs)/discover')} style={[styles.tournament, { backgroundColor: i % 2 ? c.blue : c.yellow }]}><Ionicons name="trophy-outline" size={28} color={c.text}/><View style={{ flex: 1 }}><Text style={styles.tournamentName}>{t.name}</Text><Text style={styles.tournamentMeta}>{t.city || 'Delhi NCR'} · {t.sport?.name || 'Multi-sport'}</Text></View><Ionicons name="arrow-forward" size={20} color={c.text}/></Pressable>)}</View></>}
-
-      <Pressable onPress={() => router.push('/ai-coach')} style={styles.coach}><Image source={MASCOTS} style={styles.coachMascot} contentFit="contain"/><View style={{ flex: 1 }}><Text style={styles.coachTitle}>Ready to Play?</Text><Text style={styles.coachText}>Ask AI Coach for smarter moves, drills and game-day confidence.</Text></View><View style={styles.coachBtn}><Ionicons name="sparkles" size={18} color={c.onAccent}/><Text style={styles.coachBtnText}>Ask Coach</Text></View></Pressable>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sports}>{SPORTS.map(sport => <Pressable key={sport} accessibilityRole="button" onPress={() => navigate(`/(tabs)/discover?sport=${encodeURIComponent(sport)}`)} style={s.sport}><Text style={s.sportText}>{sport}</Text></Pressable>)}</ScrollView>
+      {errors.length > 0 && <ErrorBanner error={`Some sections couldn’t load (${errors.join(', ')}). Your available results are shown below.`} retry={load} />}
+      {loading ? <SkeletonCards /> : <>
+        <Heading title="Popular Near You" action="All courts" onPress={() => navigate('/(tabs)/discover?category=facilities')} />
+        {empty('facilities', 'Your next court is on its way')}
+        <Rail>{data.facilities.slice(0, 6).map(f => <View key={f.id} style={[s.card, { width: cardWidth }]}><View><Photo uri={f.image} /><View style={s.favorite}><FavoriteButton id={f.id} /></View></View><View style={s.body}><Text style={s.cardTitle}>{f.name}</Text><Text style={s.meta}>{f.area || f.city || 'Location not listed'}{typeof f.distance_km === 'number' ? ` · ${f.distance_km.toFixed(1)} km` : ''}</Text><Text style={s.sportText}>{sportsLabel(f)}</Text><View style={s.cardFooter}><Text style={s.price}>{money(f.price_per_hour)}{typeof f.price_per_hour === 'number' ? '/hr' : ''}</Text></View><Button label="View slots" onPress={() => navigate(`/facility/${f.id}`)} iconRight={<Ionicons name="arrow-forward" size={18} color="white" />} /><Text style={s.caption}>Check live availability before booking</Text></View></View>)}</Rail>
+        <Heading title="What’s Happening" action="All events" onPress={() => navigate('/(tabs)/discover?category=events')} />
+        {empty('events', 'Make room for your next plan')}
+        <Rail>{data.events.slice(0, 6).map((e, i) => <View key={e.id} style={[s.card, { width: cardWidth, backgroundColor: i % 2 ? '#F0E9FF' : '#FFF5CC' }]}><Photo uri={e.image} /><View style={s.body}><Text style={s.sportText}>{dateLabel(e.date)}</Text><Text style={s.cardTitle}>{e.name}</Text><Text style={s.meta}>{e.venue || e.city || 'Venue to be announced'}</Text><Text style={s.meta}>{sportsLabel(e)}{e.skill_level ? ` · ${e.skill_level}` : ''}</Text>{typeof e.spots_remaining === 'number' && <Text style={s.sportText}>{Math.max(0, e.spots_remaining)} spots left</Text>}<Button label="View event" variant="secondary" onPress={() => navigate(`/event/${e.id}`)} /></View></View>)}</Rail>
+        <Heading title="Who’s Playing?" action="Find players" onPress={() => navigate('/(tabs)/play?tab=players')} />
+        {empty('players', 'Find your people')}
+        <Rail>{data.players.filter(p => !city || p.city === city).slice(0, 6).map(p => <Pressable accessibilityRole="button" key={p.id} onPress={() => navigate(`/player/${p.id}`)} style={[s.card, s.player, { width: cardWidth }]}><Avatar uri={p.avatar} name={p.name} size={64} /><View style={{ flex: 1, gap: 5 }}><Text style={s.cardTitle}>{p.name || 'Player'}</Text><Text style={s.meta}>{sportsLabel(p)}</Text><Text style={s.meta}>{[p.skill_level, p.city].filter(Boolean).join(' · ')}</Text>{p.availability && <Text style={s.sportText}>{p.availability}</Text>}</View></Pressable>)}</Rail>
+        <Heading title="Open games" action="Find a game" onPress={() => navigate('/(tabs)/play')} />
+        {empty('games', 'Start something worth showing up for')}
+        <Rail>{data.games.slice(0, 6).map(g => <View key={g.id} style={[s.card, { width: cardWidth }]}><View style={s.body}><Text style={[s.eyebrow, { color: c.success }]}>OPEN GAME</Text><Text style={s.cardTitle}>{sportsLabel(g)} · {g.format || 'Game'}</Text><Text style={s.meta}>{dateLabel(g.date)}</Text><Text style={s.meta}>{g.facility?.name || 'Venue to be confirmed'}</Text><Text style={s.meta}>{g.skill_level || 'Level not listed'}{typeof g.slots_remaining === 'number' ? ` · ${g.slots_remaining} spots left` : ''}</Text><Button label="View game" onPress={() => navigate(`/game/${g.id}`)} /></View></View>)}</Rail>
+        <Heading title="Play Tournaments" action="See all" onPress={() => navigate('/(tabs)/discover?category=tournaments')} />
+        {empty('tournaments', 'Your next challenge is coming')}
+        <Rail>{data.tournaments.slice(0, 6).map(t => <Pressable accessibilityRole="button" key={t.id} onPress={() => navigate(`/(tabs)/discover?category=tournaments&highlight=${t.id}`)} style={[s.card, s.body, { width: cardWidth, backgroundColor: '#E8EFFF' }]}><Ionicons name="trophy-outline" size={28} color={c.text} /><Text style={s.cardTitle}>{t.name}</Text><Text style={s.meta}>{dateLabel(t.date)} · {t.city}</Text><Text style={s.sportText}>{sportsLabel(t)} · Entry {money(t.entry_fee)}</Text></Pressable>)}</Rail>
+        <Heading title="Clubs & communities" action="Explore" onPress={() => navigate('/(tabs)/discover')} />
+        {clubs.length ? <Rail>{clubs.map(f => <Pressable key={f.org_id} accessibilityRole="button" onPress={() => navigate(`/facility/${f.id}`)} style={[s.card, s.body, { width: cardWidth }]}><Ionicons name="people-circle-outline" size={30} color={c.accent} /><Text style={s.cardTitle}>{f.org_name}</Text><Text style={s.meta}>{f.city}</Text></Pressable>)}</Rail> : <View style={s.callout}><Text style={s.cardTitle}>Good Games. Great People.</Text><Text style={s.meta}>Explore venues and open games to meet your local sporting community.</Text><Button label="Explore venues" variant="secondary" onPress={() => navigate('/(tabs)/discover?category=facilities')} /></View>}
+        <Heading title="Gear Up" action="Shop all" onPress={() => navigate('/marketplace')} />
+        {empty('products', 'Fresh gear is on its way')}
+        <Rail>{data.products.slice(0, 6).map(p => <Pressable key={p.id} accessibilityRole="button" onPress={() => navigate(`/product/${p.id}`)} style={[s.card, { width: cardWidth }]}><Photo uri={p.image} /><View style={s.body}><Text style={s.cardTitle}>{p.name}</Text><Text style={s.price}>{money(p.price)}</Text></View></Pressable>)}</Rail>
+      </>}
+      <View style={[s.callout, { backgroundColor: c.text }]}><Text style={s.eyebrow}>YOUR GAME. YOUR NEXT LEVEL.</Text><Text style={[s.heroSub, { fontWeight: '800' }]}>Ready to Play?</Text><Text style={[s.meta, { color: '#DDE6EE' }]}>Choose your sport, level and goal. Get coaching grounded in what your match video actually shows.</Text><Button label="Meet your AI Coach" onPress={() => navigate('/ai-coach')} /></View>
+      <Text style={s.endnote}>MatchDrome · Find your game. Find your people.</Text>
     </ScrollView>
+    <Modal transparent visible={locationOpen} animationType="fade" onRequestClose={() => setLocationOpen(false)}><View style={s.modal}><View style={s.locationSheet}><Text style={s.cardTitle}>Where’s your next game?</Text><ErrorBanner error={cityError} retry={openLocation} /><ScrollView><Button label="Explore all India" variant="secondary" onPress={() => { setCity(''); setLocationOpen(false); }} />{cities.map(name => <Button key={name} label={name} variant="secondary" onPress={() => { setCity(name); setData(EMPTY); setLoading(true); setLocationOpen(false); }} style={{ marginTop: 8 }} />)}</ScrollView><Button label="Close" variant="ghost" onPress={() => setLocationOpen(false)} /></View></View></Modal>
   </SafeAreaView>;
 }
-
-function Header({ title, icon, action, onPress }: { title: string; icon: any; action: string; onPress: () => void }) { return <View style={styles.sectionHead}><View style={styles.sectionTitle}><Ionicons name={icon} color={c.accent} size={21}/><Text style={styles.sectionText}>{title}</Text></View><Pressable onPress={onPress} style={styles.seeAll}><Text style={styles.seeAllText}>{action}</Text><Ionicons name="arrow-forward" color={c.text} size={15}/></Pressable></View>; }
-
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: c.bg }, content: { paddingBottom: 116 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, paddingTop: 2, paddingBottom: 9 },
-  logoImage: { width: 116, height: 105, marginTop: -15, marginBottom: -11 },
-  location: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: c.bgRaised, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 10 }, locationText: { fontWeight: font.weights.black, fontSize: 12 }, headerCircle: { width: 38, height: 38, borderRadius: 20, backgroundColor: c.bgRaised, alignItems: 'center', justifyContent: 'center', position: 'relative' }, noticeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.accent, position: 'absolute', top: 6, right: 7 }, profileDot: { width: 38, height: 38, borderRadius: 20, backgroundColor: c.yellow, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.text, position: 'relative' }, onlineDot: { position: 'absolute', bottom: -2, right: -2, width: 11, height: 11, borderRadius: 6, borderWidth: 2, borderColor: c.bg, backgroundColor: c.success },
-  search: { marginHorizontal: spacing.lg, backgroundColor: c.bgRaised, height: 52, borderRadius: radius.pill, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 11 }, searchText: { flex: 1, color: c.textMuted, fontSize: 14 },
-  sportRail: { paddingHorizontal: spacing.lg, paddingTop: 12, gap: 8 }, sportPill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1.5, borderColor: c.text, paddingHorizontal: 10, paddingVertical: 7, borderRadius: radius.pill }, sportEmoji: { fontSize: 14 }, sportPillText: { fontWeight: font.weights.black, fontSize: 11 },
-  actionRail: { gap: 4, paddingHorizontal: 12, paddingVertical: 15 }, action: { width: 56, alignItems: 'center', gap: 5 }, actionIcon: { width: 50, height: 50, borderRadius: 15, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: c.text }, actionLabel: { textAlign: 'center', color: c.text, fontWeight: font.weights.black, fontSize: 8.5, lineHeight: 10 }, actionArrow: { width: 20, height: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  hero: { marginHorizontal: spacing.lg, marginTop: 16, height: 218, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: c.text, ...elevation.med }, heroImage: { ...StyleSheet.absoluteFillObject }, heroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.30)' }, heroMascots: { position: 'absolute', right: -9, bottom: -16, width: 230, height: 235 }, zap: { position: 'absolute', right: 14, top: 8, color: c.lime, fontSize: 30, fontWeight: font.weights.black, transform: [{ rotate: '15deg' }] }, heroCopy: { padding: 20, height: '100%', justifyContent: 'center' }, heroEyebrow: { color: c.lime, fontWeight: font.weights.black, fontSize: 10, letterSpacing: .8 }, heroTitle: { color: '#FFFFFF', fontSize: 34, fontWeight: font.weights.black, letterSpacing: -1, marginTop: 3 }, heroNote: { color: '#FFFFFF', fontSize: 15, fontWeight: font.weights.bold, lineHeight: 18 }, heroButton: { marginTop: 13, flexDirection: 'row', backgroundColor: c.accent, borderRadius: radius.pill, alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 10, gap: 8, alignItems: 'center' }, heroButtonText: { color: c.onAccent, fontWeight: font.weights.black, fontSize: 12 },
-  sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, marginTop: 26, marginBottom: 11 }, sectionTitle: { flexDirection: 'row', alignItems: 'center', gap: 7 }, sectionText: { fontSize: 21, fontWeight: font.weights.black, letterSpacing: -.6 }, seeAll: { flexDirection: 'row', alignItems: 'center', gap: 4 }, seeAllText: { fontWeight: font.weights.bold, fontSize: 12 }, rail: { paddingHorizontal: spacing.lg, gap: 12 },
-  facility: { width: 166, backgroundColor: c.bgElevated, padding: 6, borderWidth: 1, borderColor: c.border, borderRadius: radius.md, ...elevation.low }, facilityImage: { width: '100%', height: 96, borderRadius: 11 }, distance: { position: 'absolute', top: 84, right: 10, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill }, distanceText: { fontSize: 10, fontWeight: font.weights.black }, facilityTitle: { fontWeight: font.weights.black, fontSize: 13, marginTop: 8 }, facilityMeta: { color: c.textSecondary, fontSize: 10, marginTop: 3 }, tagRow: { flexDirection: 'row', gap: 4, marginTop: 6, flexWrap: 'wrap' }, sportTag: { backgroundColor: c.bgRaised, paddingHorizontal: 5, paddingVertical: 3, borderRadius: radius.pill, fontSize: 8, color: c.textSecondary }, openTag: { backgroundColor: '#D5FFE1', paddingHorizontal: 5, paddingVertical: 3, borderRadius: radius.pill, fontSize: 8, fontWeight: font.weights.black },
-  event: { width: 174, overflow: 'hidden', borderRadius: radius.md, backgroundColor: c.bgElevated, borderWidth: 1, borderColor: c.border }, eventImage: { height: 92, width: '100%' }, eventDoodle: { position: 'absolute', top: 10, left: 8, transform: [{ rotate: '-6deg' }], paddingHorizontal: 7, paddingVertical: 4 }, eventDoodleText: { fontWeight: font.weights.black, fontSize: 10 }, date: { position: 'absolute', top: 7, right: 7, width: 32, height: 35, borderRadius: 8, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }, dateDay: { fontWeight: font.weights.black, fontSize: 16, lineHeight: 15 }, dateMonth: { fontWeight: font.weights.black, fontSize: 7 }, eventBody: { padding: 9 }, eventName: { fontWeight: font.weights.black, fontSize: 12 }, eventMeta: { color: c.textSecondary, fontSize: 9, marginTop: 4 }, eventFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }, eventLevel: { color: c.textSecondary, fontSize: 9 }, join: { backgroundColor: c.accentSoft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill }, joinText: { color: c.accentDark, fontWeight: font.weights.black, fontSize: 10 },
-  players: { paddingHorizontal: 12, gap: 8 }, player: { width: 63, alignItems: 'center' }, avatarRing: { borderWidth: 2, borderRadius: 30, padding: 2, position: 'relative' }, playerOnline: { width: 11, height: 11, borderRadius: 7, borderWidth: 2, borderColor: c.bg, position: 'absolute', right: -1, bottom: 0 }, playerName: { fontSize: 10, fontWeight: font.weights.black, marginTop: 5, maxWidth: 61 }, playerSport: { color: c.textSecondary, fontSize: 8, fontWeight: font.weights.bold, marginTop: 2 }, playerKm: { color: c.textMuted, fontSize: 9, marginTop: 2 },
-  tournamentList: { gap: 9, marginHorizontal: spacing.lg }, tournament: { borderRadius: radius.md, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 2, borderColor: c.text }, tournamentName: { fontWeight: font.weights.black, fontSize: 14 }, tournamentMeta: { color: c.textSecondary, fontSize: 11, marginTop: 3 },
-  coach: { marginHorizontal: spacing.lg, marginTop: 26, borderRadius: radius.lg, backgroundColor: c.text, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 9, overflow: 'hidden' }, coachMascot: { width: 72, height: 76, marginLeft: -15 }, coachTitle: { color: '#fff', fontSize: 17, fontWeight: font.weights.black }, coachText: { color: '#E6E3DE', fontSize: 11, marginTop: 4, lineHeight: 15 }, coachBtn: { backgroundColor: c.accent, padding: 10, borderRadius: radius.md, alignItems: 'center', gap: 3 }, coachBtnText: { color: c.onAccent, fontSize: 10, fontWeight: font.weights.black },
-});
-
-// Phone-first overrides: preserve the colourful content while preventing the
-// brand header and social hero from dominating a 360–430 pt screen.
-const mobileStyles = StyleSheet.create({
-  header: { gap: 6, paddingHorizontal: 14, paddingTop: 5, paddingBottom: 7 },
-  wordmark: { width: 78, height: 40, borderRadius: 13, backgroundColor: c.text, paddingLeft: 9, justifyContent: 'center', overflow: 'hidden', position: 'relative' },
-  wordmarkKuchu: { color: c.textInverse, fontSize: 11, lineHeight: 11, fontWeight: font.weights.black, letterSpacing: -0.4 },
-  wordmarkPuchu: { color: c.accent, fontSize: 16, lineHeight: 16, fontWeight: font.weights.black, letterSpacing: -0.8 },
-  wordmarkSpark: { position: 'absolute', right: 5, top: 4 },
-  hero: { height: 194, marginTop: 8, marginHorizontal: 14 },
+function Photo({ uri }: { uri?: string }) { const [failed, setFailed] = useState(false); return uri && !failed ? <Image source={{ uri }} style={s.photo} contentFit="cover" onError={() => setFailed(true)} /> : <View style={[s.photo, s.placeholder]}><Ionicons name="tennisball-outline" size={36} color={c.textMuted} /><Text style={s.caption}>See details</Text></View>; }
+function Heading({ title, action, onPress }: { title: string; action: string; onPress: () => void }) { return <View style={s.heading}><Text accessibilityRole="header" style={s.sectionTitle}>{title}</Text><Pressable accessibilityRole="button" onPress={onPress} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={s.link}>{action} ↗</Text></Pressable></View>; }
+const s = StyleSheet.create({
+  wrap: { flex: 1, backgroundColor: c.bg }, page: { width: '100%', maxWidth: 1200, alignSelf: 'center', paddingBottom: 28 }, header: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 16 }, location: { flexDirection: 'row', gap: 5, alignItems: 'center', minHeight: 36 }, iconButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }, search: { marginHorizontal: 16, paddingHorizontal: 16, minHeight: 54, borderRadius: 18, backgroundColor: c.bgRaised, flexDirection: 'row', alignItems: 'center', gap: 12 }, shortcuts: { gap: 10, padding: 16 }, shortcut: { width: 118, minHeight: 112, borderRadius: 20, padding: 12, justifyContent: 'space-between' }, shortcutText: { fontSize: 13, lineHeight: 18, fontWeight: '800', color: c.text }, hero: { marginHorizontal: 16, minHeight: 254, backgroundColor: c.text, borderRadius: 24, overflow: 'hidden' }, heroBody: { padding: 24, gap: 8 }, eyebrow: { fontSize: 11, fontWeight: '800', color: c.lime, letterSpacing: 1.2 }, heroTitle: { fontSize: 46, fontWeight: '900', color: 'white', letterSpacing: -2 }, heroSub: { fontSize: 22, lineHeight: 29, color: 'white' }, heroCta: { alignSelf: 'flex-start', marginTop: 10, backgroundColor: c.lime, paddingHorizontal: 18, minHeight: 48, borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 16 }, heroCtaText: { color: c.text, fontWeight: '800', fontSize: 15 }, heroSticker: { position: 'absolute', right: 36, top: 64, transform: [{ rotate: '8deg' }], color: c.lime, fontSize: 26, fontWeight: '900' }, sports: { padding: 16, gap: 8 }, sport: { paddingHorizontal: 14, minHeight: 44, borderWidth: 1, borderColor: c.border, backgroundColor: 'white', borderRadius: 22, justifyContent: 'center' }, sportText: { fontSize: 13, color: c.text, fontWeight: '600' }, heading: { marginHorizontal: 16, marginTop: 20, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }, sectionTitle: { color: c.text, fontSize: 24, fontWeight: '900', letterSpacing: -.7 }, link: { color: c.textSecondary, fontSize: 13, fontWeight: '700' }, grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, paddingHorizontal: 16 }, rail: { gap: 12, paddingHorizontal: 16, paddingBottom: 8 }, card: { borderRadius: radius.lg, backgroundColor: 'white', overflow: 'hidden', borderWidth: 1, borderColor: c.border, ...elevation.low }, photo: { height: 156, width: '100%', backgroundColor: c.bgRaised }, placeholder: { alignItems: 'center', justifyContent: 'center', gap: 8 }, body: { padding: 16, gap: 10 }, cardTitle: { fontSize: 19, fontWeight: '800', color: c.text, letterSpacing: -.3 }, meta: { fontSize: 14, lineHeight: 20, color: c.textSecondary }, caption: { fontSize: 12, lineHeight: 17, color: c.textMuted }, cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, price: { fontSize: 17, color: c.text, fontWeight: '800' }, favorite: { position: 'absolute', right: 10, top: 10 }, player: { padding: 16, flexDirection: 'row', gap: 14, alignItems: 'center' }, callout: { padding: 22, margin: 16, borderRadius: 24, backgroundColor: '#E9FAD9', gap: 14 }, endnote: { padding: 16, color: c.textMuted, fontSize: 12, textAlign: 'center' }, modal: { flex: 1, backgroundColor: 'rgba(8,28,43,.5)', justifyContent: 'center', alignItems: 'center', padding: 16 }, locationSheet: { maxHeight: '85%', width: '100%', maxWidth: 460, borderRadius: 24, backgroundColor: 'white', padding: 24, gap: 16 },
 });

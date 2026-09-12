@@ -1,3 +1,4 @@
+import { ErrorBanner } from '@/src/components/states';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,20 +18,23 @@ export default function ProductDetail() {
   const router = useRouter();
   const { user } = useSession();
   const [p, setP] = useState<any>(null);
+  const [error, setError] = useState<unknown>();
   const [added, setAdded] = useState(false);
   const [adding, setAdding] = useState(false);
 
-  useEffect(() => { (async () => setP(await api.product(String(id))))(); }, [id]);
+  async function load() { try { setP(await api.product(String(id))); setError(null); } catch(e) { setError(e); } }
+  useEffect(() => { load(); }, [id]);
+  if (!p && error) return <ErrorBanner error={error} retry={load} />;
   if (!p) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
 
-  async function add() {
-    if (!requireAuth(user, router, `/product/${p.id}`)) return;
+  async function add(authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => add(true))) return;
     setAdding(true);
     try {
       await api.addToCart(p.id, 1);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setAdded(true);
-    } finally { setAdding(false); }
+    } catch(e) { setError(e); } finally { setAdding(false); }
   }
 
   const discount = p.original_price ? Math.round((1 - p.price / p.original_price) * 100) : 0;
@@ -47,7 +51,7 @@ export default function ProductDetail() {
           </SafeAreaView>
         </View>
 
-        <View style={styles.body}>
+        <View style={styles.body}><ErrorBanner error={error} />
           <Text style={styles.brand}>{p.brand}</Text>
           <Text style={styles.name}>{p.name}</Text>
           <View style={styles.priceRow}>
@@ -78,7 +82,7 @@ export default function ProductDetail() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable testID="product-add-cart" disabled={adding} style={styles.addBtn} onPress={add}>
+        <Pressable testID="product-add-cart" disabled={adding} style={styles.addBtn} onPress={() => add()}>
           {added ? <Ionicons name="checkmark" size={16} color={colors.onSurface} /> : null}
           <Text style={styles.addBtnText}>{added ? 'Added' : adding ? 'Adding…' : 'Add to cart'}</Text>
         </Pressable>

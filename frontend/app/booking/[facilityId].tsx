@@ -1,3 +1,7 @@
+import { useSession } from '@/src/session';
+import { requireAuth } from '@/src/auth-gate';
+import { ErrorBanner } from '@/src/components/states';
+import { openCheckout, verifiedPayment } from '@/src/payments';
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
@@ -16,6 +20,10 @@ function nextDates(n: number) {
 export default function Booking() {
   const { facilityId } = useLocalSearchParams<{ facilityId: string }>();
   const router = useRouter();
+  const { user } = useSession();
+  const [loadError, setLoadError] = useState<unknown>();
+  const [paymentId, setPaymentId] = useState('');
+  const [retry, setRetry] = useState(0);
   const [facility, setFacility] = useState<any>(null);
   const [dates] = useState(nextDates(7));
   const [dateIdx, setDateIdx] = useState(0);
@@ -27,32 +35,36 @@ export default function Booking() {
   const [email, setEmail] = useState('');
   const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
 
-  const dateStr = dates[dateIdx].toISOString().slice(0, 10);
+  const dateStr = dates[dateIdx].toLocaleDateString('en-CA');
 
-  useEffect(() => { (async () => setFacility(await api.facility(String(facilityId))))(); }, [facilityId]);
+  useEffect(() => { api.facility(String(facilityId)).then(setFacility).catch(setLoadError); }, [facilityId, retry]);
   useEffect(() => {
     setSelectedSlot(null);
-    (async () => setAvail(await api.availability(String(facilityId), dateStr)))();
-  }, [facilityId, dateStr]);
+    setAvail(null); setLoadError(null); let active = true;
+    api.availability(String(facilityId), dateStr).then(value => { if (active) setAvail(value); }).catch(e => { if (active) setLoadError(e); });
+    return () => { active = false; };
+  }, [facilityId, dateStr, retry]);
 
   const courtData = avail?.courts?.find((c: any) => c.court_number === court);
 
-  async function confirm() {
-    if (!selectedSlot) return;
+  async function confirm(authenticated = false) {
+    if (!authenticated && !requireAuth(user, router, undefined, () => confirm(true))) return;
+    if (!selectedSlot && !paymentId) return;
     setBooking(true);
     try {
       setPaymentMessage(null);
+      if (paymentId) { setConfirmed(await verifiedPayment(paymentId)); return; }
       const res: any = await api.createBooking({ facility_id: facilityId, court_number: court, date: dateStr, slot: selectedSlot, duration_min: 60, customer_email: email.trim() || undefined });
       if (res.checkout_url && res.payment?.id) {
-        await WebBrowser.openBrowserAsync(`${apiBaseUrl}${res.checkout_url}`);
-        const status: any = await api.paymentStatus(res.payment.id);
-        if (status.payment?.status === 'succeeded' && status.resource) setConfirmed(status.resource);
-        else setPaymentMessage('Payment is awaiting PayU verification. Pull to refresh My Bookings in a moment.');
+        setPaymentId(res.payment.id);
+        await openCheckout(res);
+        setConfirmed(await verifiedPayment(res.payment.id));
       } else setConfirmed(res);
     } catch (error) { setPaymentMessage(error instanceof Error ? error.message : 'Could not start payment.'); }
     finally { setBooking(false); }
   }
 
+  if (loadError) return <SafeAreaView style={{ flex: 1 }}><ScreenHeader title="Book a court" onBack={() => router.back()} /><ErrorBanner error={loadError} retry={() => setRetry(v => v + 1)} /></SafeAreaView>;
   if (!facility || !avail) return <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}><Loader /></SafeAreaView>;
 
   if (confirmed) {
@@ -107,7 +119,7 @@ export default function Booking() {
             <Pressable
               key={cc.court_number}
               testID={`booking-court-${cc.court_number}`}
-              onPress={() => setCourt(cc.court_number)}
+              onPress={() => { setCourt(cc.court_number); setSelectedSlot(null); }}
               style={[styles.courtChip, court === cc.court_number && styles.courtChipActive]}
             >
               <Text style={[styles.courtChipText, court === cc.court_number && styles.textActive]}>
@@ -145,10 +157,10 @@ export default function Booking() {
         </View>
         <View style={{ minWidth: 160 }}>
           <Button
-            label={booking ? 'Processing…' : 'Confirm & pay'}
+            label={booking ? 'Processing…' : paymentId ? 'Check payment' : 'Confirm & pay'}
             testID="booking-confirm-btn"
-            disabled={!selectedSlot || booking}
-            onPress={confirm}
+            disabled={(!selectedSlot && !paymentId) || booking}
+            onPress={() => confirm()}
             fullWidth={false}
             style={{ paddingHorizontal: spacing.xl }}
           />
