@@ -60,6 +60,8 @@ def _words(text: str) -> list[str]:
 
 def chunk_text(text: str, *, target_words: int = 180, overlap_words: int = 32) -> list[str]:
     """Create paragraph/sentence-respecting chunks with a small context overlap."""
+    if target_words <= 0 or not 0 <= overlap_words < target_words:
+        raise ValueError("Require target_words > 0 and 0 <= overlap_words < target_words")
     text = clean_text(text)
     if not text:
         return []
@@ -76,7 +78,8 @@ def chunk_text(text: str, *, target_words: int = 180, overlap_words: int = 32) -
         unit_words = len(_words(unit))
         if current and current_words + unit_words > target_words:
             chunks.append(" ".join(current).strip())
-            overlap = _words(chunks[-1])[-overlap_words:]
+            overlap = _words(chunks[-1])[-overlap_words:] if overlap_words else []
+            overlap = overlap[-max(0, target_words - unit_words):] if unit_words < target_words else []
             current = [" ".join(overlap)] if overlap else []
             current_words = len(overlap)
         # A very long sentence is still safely split into bounded chunks.
@@ -114,6 +117,7 @@ class SourceDocument:
     authority_level: int = 2
     confidence: float = 0.8
     source_updated_at: Optional[str] = None
+    last_verified_at: Optional[str] = None
     skill: Optional[str] = None
     skill_level: Optional[str] = None
     situation: Optional[str] = None
@@ -136,7 +140,7 @@ class SourceDocument:
 def document_to_items(document: SourceDocument, *, verified_at: Optional[str] = None) -> list[KnowledgeItem]:
     cleaned = clean_text(document.text)
     chunks = chunk_text(cleaned)
-    verified_at = verified_at or now_iso()
+    verified_at = verified_at or document.last_verified_at
     source_hash = content_hash(cleaned)
     count = len(chunks)
     items: list[KnowledgeItem] = []

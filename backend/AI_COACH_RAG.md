@@ -30,7 +30,24 @@ Do not paste full third-party articles or rule books into the database.
 
 Run this refresh when an official rule book changes and on a regular review
 cadence (for example, monthly). The response reports inserted, changed and
-unchanged sources/chunks.
+unchanged sources/chunks, plus `embeddings_ready` and `embeddings_pending`.
+If pending is nonzero, check provider configuration/availability and repeat
+the refresh. Pending chunks remain available to lexical retrieval.
+
+Refresh re-indexes the curated notes; it does **not** fetch web pages or
+re-verify them. `last_verified_at` is an explicit editorial review date and
+`last_ingested_at` is the database refresh time. Unknown review dates stay
+empty. To add web knowledge, review the primary source, write a focused
+original summary with its URL and metadata in `knowledge_seed.py`, record
+the review date, and run refresh. Do not infer a publication date from the
+date a note was reviewed. Seven additional notes were reviewed on 2026-09-12,
+bringing the registry to 19 notes across five sports.
+
+Embedding reuse requires the same provider, model, and normalized title/body input
+hash. Model changes and changed titles/text trigger re-embedding. Failed or
+invalid replacements clear the old vector and mark the chunk pending; the
+next refresh retries it. Existing records without this embedding provenance
+will be re-embedded once after deployment.
 
 ## Atlas Vector Search (recommended for production)
 
@@ -46,7 +63,9 @@ index named `ai_coach_knowledge_vector` on the database collection
     { "type": "vector", "path": "embedding", "numDimensions": 768, "similarity": "cosine" },
     { "type": "filter", "path": "active" },
     { "type": "filter", "path": "sport" },
-    { "type": "filter", "path": "category" }
+    { "type": "filter", "path": "category" },
+    { "type": "filter", "path": "embedding_model" },
+    { "type": "filter", "path": "embedding_provider" }
   ]
 }
 ```
@@ -55,7 +74,17 @@ Then set `AI_COACH_VECTOR_INDEX=ai_coach_knowledge_vector` on the API and
 worker and restart them. If the embedding model or dimensionality changes,
 create a compatible index and re-ingest every source before switching traffic.
 The retriever logs a warning and falls back safely if the index is absent or
-still building.
+still building. Update existing indexes with the two embedding provenance
+filter fields above before rollout. Use dimensions matching the configured
+provider's actual vectors; the example is specific to the Vertex model.
+
+Atlas results are combined with a bounded scan of up to 500 records. This keeps
+pending, lexical-only chunks eligible, but keyword coverage is incomplete
+for larger collections. Add an indexed lexical candidate path before growing
+the corpus beyond this bound. Atlas scores are converted back to cosine
+before reranking so they match the fallback scoring scale. All caller filters
+are applied; an empty sport corpus never falls back to another sport.
+Authority and skill-level bonuses cannot qualify otherwise unrelated evidence.
 
 ## Evidence contract
 
@@ -64,3 +93,19 @@ schema requires citation IDs; invalid IDs are discarded server-side. Responses
 include `citations` and `sources`. If no reliable source is retrieved, the
 report marks `reliable_coaching_source_not_retrieved` as unavailable instead of
 inventing a citation.
+
+## Validation and rollout
+
+From the repository root, run:
+
+```sh
+python -m unittest backend.ai_coach.retriever.test_rag_pipeline -v
+```
+
+Tests use deterministic providers and in-memory collections. They cover
+embedding reuse, failure/retry, model changes, invalid vectors, chunk bounds,
+source dates, sport isolation, no-evidence retrieval, Atlas score parity and
+representative questions. They do not establish live model quality or Atlas
+latency. After deployment, an admin must run the refresh with the application's
+MongoDB connection and configured AI provider, check that pending is zero,
+and evaluate real coach responses and citations before production acceptance.
