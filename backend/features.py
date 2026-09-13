@@ -3,6 +3,7 @@
 All authorization is enforced on the backend. Prices/availability/rewards are
 validated server-side; the client is never trusted for money or state.
 """
+from demo_records import real_records
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional, List
@@ -31,7 +32,7 @@ def _coach_slots():
 
 @router.get("/coaches/{coach_id}/availability")
 async def coach_availability(coach_id: str, date: str):
-    coach = await db.coaches.find_one({"id": coach_id}, {"_id": 0})
+    coach = await db.coaches.find_one(real_records('coaches', {"id": coach_id}), {"_id": 0})
     if not coach:
         raise KuviraError(404, "COACH_NOT_FOUND", "Coach not found")
     booked = await db.coach_sessions.find(
@@ -44,7 +45,7 @@ async def coach_availability(coach_id: str, date: str):
 
 @router.post("/coach-sessions")
 async def book_coach_session(body: CoachBookingCreate, user=Depends(current_user)):
-    coach = await db.coaches.find_one({"id": body.coach_id}, {"_id": 0})
+    coach = await db.coaches.find_one(real_records('coaches', {"id": body.coach_id}), {"_id": 0})
     if not coach:
         raise KuviraError(404, "COACH_NOT_FOUND", "Coach not found")
     if body.slot not in _coach_slots():
@@ -192,7 +193,7 @@ async def training_streak(user=Depends(current_user)):
 # ===========================================================================
 
 async def _user_points(user_id: str) -> int:
-    games = await db.games.count_documents({"current_players": user_id})
+    games = await db.games.count_documents(real_records('games', {"current_players": user_id}))
     bookings = await db.bookings.count_documents({"user_id": user_id})
     sessions = await db.coach_sessions.count_documents({"user_id": user_id})
     active = await db.training_activity.count_documents({"user_id": user_id})
@@ -201,7 +202,7 @@ async def _user_points(user_id: str) -> int:
 
 @router.get("/rankings")
 async def rankings(scope: str = "city", user=Depends(current_user)):
-    players = await db.players.find({}, {"_id": 0}).to_list(200)
+    players = await db.players.find(real_records('players', {}), {"_id": 0}).to_list(200)
     board = []
     for p in players:
         if scope == "city" and user.get("city") and p.get("city") != user.get("city"):
@@ -243,8 +244,8 @@ ACHIEVEMENTS = [
 async def achievements(user=Depends(current_user)):
     uid = user["id"]
     bookings = await db.bookings.count_documents({"user_id": uid})
-    games = await db.games.count_documents({"current_players": uid})
-    posts = await db.posts.count_documents({"author_id": uid})
+    games = await db.games.count_documents(real_records('games', {"current_players": uid}))
+    posts = await db.posts.count_documents(real_records('posts', {"author_id": uid}))
     orders = await db.orders.count_documents({"user_id": uid})
     sessions = await db.coach_sessions.count_documents({"user_id": uid})
     streak = (await training_streak(user))["streak_days"]
@@ -317,7 +318,7 @@ async def award_first_game_referral(user_id: str):
     already = await db.referral_rewards.find_one({"referred_user_id": user_id})
     if already:
         return
-    games = await db.games.count_documents({"current_players": user_id})
+    games = await db.games.count_documents(real_records('games', {"current_players": user_id}))
     if games < 1:
         return
     referrer_id = user["referred_by"]

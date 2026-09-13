@@ -21,6 +21,7 @@ Court/Slot/Booking access matrix:
   Manage staff             |  ✅   |  ✅   |   ❌    |   ❌
   Transfer ownership       |  ✅   |  ❌   |   ❌    |   ❌
 """
+from demo_records import real_records
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -271,7 +272,7 @@ async def _get_or_invite_user(mobile: str, name: Optional[str]) -> dict:
 
 async def _org_facility_ids(org_id: str) -> List[str]:
     facs = await db.facilities.find(
-        {"org_id": org_id, "status": {"$ne": "inactive"}}, {"_id": 0, "id": 1}
+        real_records('facilities', {"org_id": org_id, "status": {"$ne": "inactive"}}), {"_id": 0, "id": 1}
     ).to_list(200)
     return [f["id"] for f in facs]
 
@@ -282,7 +283,7 @@ async def _org_facility_ids(org_id: str) -> List[str]:
 
 @router.get("/admin/clubs")
 async def admin_list_clubs(admin=Depends(require_platform_admin())):
-    return await db.organizations.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return await db.organizations.find(real_records('organizations', {}), {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
 @router.post("/admin/clubs")
@@ -302,7 +303,7 @@ async def admin_create_club(body: ClubCreate, admin=Depends(require_platform_adm
 
 @router.post("/admin/clubs/{org_id}/owner")
 async def admin_assign_owner(org_id: str, body: AssignOwner, admin=Depends(require_platform_admin())):
-    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    org = await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0})
     if not org:
         raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
     owner = await _get_or_invite_user(body.mobile, body.name)
@@ -333,12 +334,12 @@ async def admin_grant_platform_admin(user_id: str, admin=Depends(require_platfor
 
 @router.get("/admin/clubs/{org_id}/facilities")
 async def admin_org_facilities(org_id: str, admin=Depends(require_platform_admin())):
-    return await db.facilities.find({"org_id": org_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return await db.facilities.find(real_records('facilities', {"org_id": org_id}), {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
 @router.post("/admin/clubs/{org_id}/facilities")
 async def admin_create_facility(org_id: str, body: FacilityCreate, admin=Depends(require_platform_admin())):
-    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    org = await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0})
     if not org:
         raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
     if body.courts_count < 1:
@@ -365,7 +366,7 @@ async def admin_update_facility(org_id: str, facility_id: str, body: FacilityUpd
     result = await db.facilities.update_one({"id": facility_id, "org_id": org_id}, {"$set": updates})
     if result.matched_count == 0:
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
-    return await db.facilities.find_one({"id": facility_id}, {"_id": 0})
+    return await db.facilities.find_one(real_records('facilities', {"id": facility_id}), {"_id": 0})
 
 
 @router.delete("/admin/clubs/{org_id}/facilities/{facility_id}")
@@ -380,7 +381,7 @@ async def admin_delete_facility(org_id: str, facility_id: str, admin=Depends(req
 
 
 async def _admin_catalog_list(collection: str):
-    return await db[collection].find({"is_demo": {"$ne": True}}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return await db[collection].find(real_records(collection, {"is_demo": {"$ne": True}}), {"_id": 0}).sort("created_at", -1).to_list(500)
 
 
 @router.get("/admin/events")
@@ -401,7 +402,7 @@ async def admin_update_event(event_id: str, body: EventUpdate, admin=Depends(req
     updates["updated_at"] = utcnow().isoformat()
     result = await db.events.update_one({"id": event_id, "is_demo": {"$ne": True}}, {"$set": updates})
     if result.matched_count == 0: raise KuviraError(404, "EVENT_NOT_FOUND", "Event not found")
-    return await db.events.find_one({"id": event_id}, {"_id": 0})
+    return await db.events.find_one(real_records('events', {"id": event_id}), {"_id": 0})
 
 
 @router.delete("/admin/events/{event_id}")
@@ -429,7 +430,7 @@ async def admin_update_tournament(tournament_id: str, body: TournamentUpdate, ad
     updates["updated_at"] = utcnow().isoformat()
     result = await db.tournaments.update_one({"id": tournament_id, "is_demo": {"$ne": True}}, {"$set": updates})
     if result.matched_count == 0: raise KuviraError(404, "TOURNAMENT_NOT_FOUND", "Tournament not found")
-    return await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
+    return await db.tournaments.find_one(real_records('tournaments', {"id": tournament_id}), {"_id": 0})
 
 
 @router.delete("/admin/tournaments/{tournament_id}")
@@ -457,7 +458,7 @@ async def admin_update_product(product_id: str, body: ProductUpdate, admin=Depen
     updates["updated_at"] = utcnow().isoformat()
     result = await db.products.update_one({"id": product_id, "is_demo": {"$ne": True}}, {"$set": updates})
     if result.matched_count == 0: raise KuviraError(404, "PRODUCT_NOT_FOUND", "Product not found")
-    return await db.products.find_one({"id": product_id}, {"_id": 0})
+    return await db.products.find_one(real_records('products', {"id": product_id}), {"_id": 0})
 
 
 @router.delete("/admin/products/{product_id}")
@@ -473,7 +474,7 @@ async def admin_delete_product(product_id: str, admin=Depends(require_platform_a
 
 @router.get("/orgs/{org_id}")
 async def get_org(org_id: str, user=Depends(require_org_permission("club.view"))):
-    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    org = await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0})
     if not org:
         raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
     return org
@@ -484,7 +485,7 @@ async def update_org(org_id: str, body: ClubUpdate, user=Depends(require_org_per
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if updates:
         await db.organizations.update_one({"id": org_id}, {"$set": updates})
-    return await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    return await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0})
 
 
 # ---------------------------------------------------------------------------
@@ -494,7 +495,7 @@ async def update_org(org_id: str, body: ClubUpdate, user=Depends(require_org_per
 @router.get("/orgs/{org_id}/facilities")
 async def org_facilities(org_id: str, user=Depends(require_org_permission("club.view"))):
     return await db.facilities.find(
-        {"org_id": org_id, "status": {"$ne": "inactive"}}, {"_id": 0}
+        real_records('facilities', {"org_id": org_id, "status": {"$ne": "inactive"}}), {"_id": 0}
     ).to_list(200)
 
 
@@ -503,7 +504,7 @@ async def org_create_facility(
     org_id: str, body: FacilityCreate,
     user=Depends(require_org_permission("club.courts.create"))  # Owner + Admin only
 ):
-    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    org = await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0})
     if not org:
         raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
     if body.courts_count < 1:
@@ -534,7 +535,7 @@ async def org_update_facility(
     result = await db.facilities.update_one({"id": facility_id, "org_id": org_id}, {"$set": updates})
     if result.matched_count == 0:
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
-    return await db.facilities.find_one({"id": facility_id}, {"_id": 0})
+    return await db.facilities.find_one(real_records('facilities', {"id": facility_id}), {"_id": 0})
 
 
 @router.delete("/orgs/{org_id}/facilities/{facility_id}")
@@ -586,7 +587,7 @@ async def org_list_slots(
     q: dict = {"facility_id": facility_id, "org_id": org_id}
     if date:
         q["date"] = date
-    slots = await db.facility_slots.find(q, {"_id": 0}).to_list(500)
+    slots = await db.facility_slots.find(real_records('facility_slots', q), {"_id": 0}).to_list(500)
     return {"facility_id": facility_id, "slots": slots}
 
 
@@ -596,7 +597,7 @@ async def org_create_slots(
     user=Depends(require_org_permission("club.slots.manage"))  # Owner + Admin + Manager
 ):
     """Create or override slot availability for a court on a specific date."""
-    facility = await db.facilities.find_one({"id": facility_id, "org_id": org_id}, {"_id": 0})
+    facility = await db.facilities.find_one(real_records('facilities', {"id": facility_id, "org_id": org_id}), {"_id": 0})
     if not facility:
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
     if body.court_number < 1 or body.court_number > facility.get("courts_count", 1):
@@ -735,7 +736,7 @@ async def org_cancel_booking(
 @router.get("/orgs/{org_id}/games")
 async def org_games(org_id: str, user=Depends(require_org_permission("club.games.manage"))):
     fids = await _org_facility_ids(org_id)
-    return await db.games.find({"facility_id": {"$in": fids}}, {"_id": 0}).to_list(300)
+    return await db.games.find(real_records('games', {"facility_id": {"$in": fids}}), {"_id": 0}).to_list(300)
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +840,7 @@ async def transfer_ownership(
     org_id: str, body: OwnershipTransfer,
     user=Depends(require_org_permission("club.ownership.transfer"))  # Owner only
 ):
-    org = await db.organizations.find_one({"id": org_id}, {"_id": 0, "id": 1, "name": 1})
+    org = await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0, "id": 1, "name": 1})
     if not org:
         raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
     target = await _get_or_invite_user(body.mobile, body.name)
@@ -889,7 +890,7 @@ async def org_analytics(org_id: str, user=Depends(require_org_permission("club.a
     revenue = sum(b.get("price", 0) for b in bookings if b.get("status") == "confirmed") if can_finance else None
     confirmed = sum(1 for b in bookings if b.get("status") == "confirmed")
     cancelled = sum(1 for b in bookings if b.get("status") == "cancelled")
-    games = await db.games.count_documents({"facility_id": {"$in": fids}})
+    games = await db.games.count_documents(real_records('games', {"facility_id": {"$in": fids}}))
     members = await db.organization_memberships.count_documents({"org_id": org_id, "status": "active"})
     return {
         "bookings_count": len(bookings),
@@ -976,7 +977,7 @@ async def org_list_events(
 ):
     """List all org events including drafts (managers can see drafts)."""
     return await db.events.find(
-        {"org_id": org_id}, {"_id": 0}
+        real_records('events', {"org_id": org_id}), {"_id": 0}
     ).sort("date", 1).to_list(200)
 
 
@@ -985,7 +986,7 @@ async def org_create_event(
     org_id: str, body: EventCreate,
     user=Depends(require_org_permission("club.events.manage"))  # Owner + Admin + Manager
 ):
-    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    org = await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0})
     if not org:
         raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
     if body.status not in ("draft", "published", "cancelled"):
@@ -994,7 +995,7 @@ async def org_create_event(
     city = org.get("city", "")
     state = org.get("state", "")
     if body.facility_id:
-        fac = await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}, {"_id": 0})
+        fac = await db.facilities.find_one(real_records('facilities', {"id": body.facility_id, "org_id": org_id}), {"_id": 0})
         if not fac:
             raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
         if fac:
@@ -1022,19 +1023,19 @@ async def org_update_event(
     org_id: str, event_id: str, body: EventUpdate,
     user=Depends(require_org_permission("club.events.manage"))
 ):
-    event = await db.events.find_one({"id": event_id, "org_id": org_id}, {"_id": 0})
+    event = await db.events.find_one(real_records('events', {"id": event_id, "org_id": org_id}), {"_id": 0})
     if not event:
         raise KuviraError(404, "EVENT_NOT_FOUND", "Event not found in this club")
     if body.status and body.status not in ("draft", "published", "cancelled"):
         raise KuviraError(400, "INVALID_STATUS", "Status must be draft, published, or cancelled")
-    if body.facility_id and not await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}):
+    if body.facility_id and not await db.facilities.find_one(real_records('facilities', {"id": body.facility_id, "org_id": org_id})):
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     updates["updated_at"] = utcnow().isoformat()
     await db.events.update_one({"id": event_id}, {"$set": updates})
     if body.status:
         await _write_audit_log(org_id, f"event.{body.status}", user["id"], {"event_id": event_id}, event_id, "event")
-    return await db.events.find_one({"id": event_id}, {"_id": 0})
+    return await db.events.find_one(real_records('events', {"id": event_id}), {"_id": 0})
 
 
 @router.delete("/orgs/{org_id}/events/{event_id}")
@@ -1059,7 +1060,7 @@ async def org_list_tournaments(
     user=Depends(require_org_permission("club.view"))
 ):
     return await db.tournaments.find(
-        {"org_id": org_id}, {"_id": 0}
+        real_records('tournaments', {"org_id": org_id}), {"_id": 0}
     ).sort("date", 1).to_list(200)
 
 
@@ -1068,7 +1069,7 @@ async def org_create_tournament(
     org_id: str, body: TournamentCreate,
     user=Depends(require_org_permission("club.events.manage"))
 ):
-    org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    org = await db.organizations.find_one(real_records('organizations', {"id": org_id}), {"_id": 0})
     if not org:
         raise KuviraError(404, "ORG_NOT_FOUND", "Club not found")
     if body.status not in ("draft", "published", "cancelled"):
@@ -1077,7 +1078,7 @@ async def org_create_tournament(
     city = org.get("city", "")
     state = org.get("state", "")
     if body.facility_id:
-        fac = await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}, {"_id": 0})
+        fac = await db.facilities.find_one(real_records('facilities', {"id": body.facility_id, "org_id": org_id}), {"_id": 0})
         if not fac:
             raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
         if fac:
@@ -1106,19 +1107,19 @@ async def org_update_tournament(
     org_id: str, tournament_id: str, body: TournamentUpdate,
     user=Depends(require_org_permission("club.events.manage"))
 ):
-    t = await db.tournaments.find_one({"id": tournament_id, "org_id": org_id}, {"_id": 0})
+    t = await db.tournaments.find_one(real_records('tournaments', {"id": tournament_id, "org_id": org_id}), {"_id": 0})
     if not t:
         raise KuviraError(404, "TOURNAMENT_NOT_FOUND", "Tournament not found in this club")
     if body.status and body.status not in ("draft", "published", "cancelled"):
         raise KuviraError(400, "INVALID_STATUS", "Status must be draft, published, or cancelled")
-    if body.facility_id and not await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}):
+    if body.facility_id and not await db.facilities.find_one(real_records('facilities', {"id": body.facility_id, "org_id": org_id})):
         raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     updates["updated_at"] = utcnow().isoformat()
     await db.tournaments.update_one({"id": tournament_id}, {"$set": updates})
     if body.status:
         await _write_audit_log(org_id, f"tournament.{body.status}", user["id"], {"tournament_id": tournament_id}, tournament_id, "tournament")
-    return await db.tournaments.find_one({"id": tournament_id}, {"_id": 0})
+    return await db.tournaments.find_one(real_records('tournaments', {"id": tournament_id}), {"_id": 0})
 
 
 @router.delete("/orgs/{org_id}/tournaments/{tournament_id}")
@@ -1157,7 +1158,7 @@ async def org_audit_log(
 async def admin_overview(admin=Depends(require_platform_admin())):
     import asyncio
     names = ["users", "bookings", "organizations", "events", "tournaments", "ai_coach_jobs"]
-    counts = await asyncio.gather(*(db[name].count_documents({"is_demo": {"$ne": True}}) for name in names))
+    counts = await asyncio.gather(*(db[name].count_documents(real_records(name, {"is_demo": {"$ne": True}})) for name in names))
     payment_groups = await db.payment_transactions.aggregate([
         {"$group": {"_id": "$status", "count": {"$sum": 1}, "amount": {"$sum": {"$convert": {"input": "$amount", "to": "double", "onError": 0, "onNull": 0}}}}}
     ]).to_list(30)

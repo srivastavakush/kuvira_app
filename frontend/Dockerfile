@@ -1,10 +1,12 @@
-# Build Kuvira Expo web app
+# Build MatchDrome Expo web app
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 ARG EXPO_PUBLIC_BACKEND_URL=https://kuvira-api-13914469738.asia-south1.run.app
 ENV EXPO_PUBLIC_BACKEND_URL=${EXPO_PUBLIC_BACKEND_URL}
+ARG EXPO_PUBLIC_AUTH_MODE=firebase
+ENV EXPO_PUBLIC_AUTH_MODE=${EXPO_PUBLIC_AUTH_MODE}
 
 # Copy manifest first for better Docker layer caching.
 COPY package.json ./
