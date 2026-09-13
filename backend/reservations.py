@@ -1,4 +1,5 @@
 """Atomic inventory reservations. MongoDB replica-set transactions are required."""
+from demo_records import real_records
 from datetime import datetime, timezone, timedelta
 from deps import KuviraError, gen_id
 
@@ -38,7 +39,7 @@ async def reserve_order(db, user, address, email):
             qty = line['qty']
             if not isinstance(qty, int) or qty < 1 or qty > 100:
                 raise KuviraError(400, 'INVALID_QUANTITY', 'Choose a quantity between 1 and 100')
-            product = await db.products.find_one({'id': line['product_id'], 'status': 'active'}, {'_id': 0}, session=session)
+            product = await db.products.find_one(real_records('products', {'id': line['product_id'], 'status': 'active'}), {'_id': 0}, session=session)
             if not product:
                 raise KuviraError(409, 'PRODUCT_UNAVAILABLE', 'An item is no longer available')
             result = await db.products.update_one({'id': product['id'], 'stock': {'$gte': qty}}, {'$inc': {'stock': -qty}}, session=session)
@@ -59,7 +60,7 @@ async def reserve_order(db, user, address, email):
 async def reserve_tournament(db, tid, user, email):
     from payments import create_checkout
     async def operation(session):
-        t = await db.tournaments.find_one({'id':tid, 'status':'published'}, session=session)
+        t = await db.tournaments.find_one(real_records('tournaments', {'id':tid, 'status':'published'}), session=session)
         if not t:
             raise KuviraError(404,'TOURNAMENT_UNAVAILABLE','Tournament is not open for registration')
         existing = await db.tournament_registrations.find_one({'tournament_id':tid,'user_id':user['id'], 'status':{'$in':['confirmed','pending_payment']}}, session=session)
@@ -92,12 +93,12 @@ async def reserve_booking(db, body, user):
     if body.slot not in [f'{h:02d}:00-{h+1:02d}:00' for h in range(6,23)] or body.duration_min!=60:
         raise KuviraError(400,'INVALID_SLOT','Choose an available one-hour slot')
     async def operation(session):
-        f=await db.facilities.find_one({'id':body.facility_id,'status':{'$ne':'inactive'}},session=session)
+        f=await db.facilities.find_one(real_records('facilities', {'id':body.facility_id,'status':{'$ne':'inactive'}}),session=session)
         if not f:raise KuviraError(404,'FACILITY_NOT_FOUND','Facility unavailable')
-        if f.get('org_id') and await db.organizations.find_one({'id':f['org_id'],'status':'inactive'},session=session):
+        if f.get('org_id') and await db.organizations.find_one(real_records('organizations', {'id':f['org_id'],'status':'inactive'}),session=session):
             raise KuviraError(409,'CLUB_UNAVAILABLE','Club is not accepting bookings')
         if body.court_number<1 or body.court_number>f.get('courts_count',1):raise KuviraError(400,'INVALID_COURT','Choose a valid court')
-        if await db.facility_slots.find_one({'facility_id':f['id'],'court_number':body.court_number,'date':{'$in':[body.date,'*']},'slot':body.slot,'status':'blocked'},session=session):
+        if await db.facility_slots.find_one(real_records('facility_slots', {'facility_id':f['id'],'court_number':body.court_number,'date':{'$in':[body.date,'*']},'slot':body.slot,'status':'blocked'}),session=session):
             raise KuviraError(409,'SLOT_BLOCKED','This slot is closed')
         price=f['price_per_hour'];paid=PAYMENT_PROVIDER=='payu' and price>0
         booking={'id':gen_id(),'user_id':user['id'],'facility_id':f['id'],'facility_name':f['name'],'facility_image':f.get('image',''),'court_number':body.court_number,'date':body.date,'slot':body.slot,'duration_min':60,'price':price,'slot_active':True,'status':'pending_payment' if paid else 'confirmed','created_at':datetime.now(timezone.utc).isoformat(),'expires_at':expires_at()}

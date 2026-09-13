@@ -12,6 +12,7 @@ MVP scope:
 import os
 import html
 import asyncio
+from demo_records import real_records
 from io import BytesIO
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -412,7 +413,7 @@ async def facilities_nearby(
         "org_status": {"$ne": "inactive"},
     }
     if sport: q["sports"] = sport
-    facilities = await db.facilities.find(q, {"_id": 0}).to_list(50)
+    facilities = await db.facilities.find(real_records('facilities', q), {"_id": 0}).to_list(50)
     # Attach distance_km
     for f in facilities:
         flat, flng = f.get("lat"), f.get("lng")
@@ -437,9 +438,9 @@ async def list_facilities(city: Optional[str] = None, sport: Optional[str] = Non
         q["city"] = city
     if sport:
         q["sports"] = sport
-    items = await db.facilities.find(q, {"_id": 0}).to_list(200)
+    items = await db.facilities.find(real_records('facilities', q), {"_id": 0}).to_list(200)
     org_ids = list({item.get("org_id") for item in items if item.get("org_id")})
-    orgs = await db.organizations.find({"id": {"$in": org_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    orgs = await db.organizations.find(real_records('organizations', {"id": {"$in": org_ids}}), {"_id": 0, "id": 1, "name": 1}).to_list(200)
     names = {org["id"]: org.get("name") for org in orgs}
     for item in items:
         if item.get("org_id") in names:
@@ -448,7 +449,7 @@ async def list_facilities(city: Optional[str] = None, sport: Optional[str] = Non
 
 @api.get("/facilities/{fid}")
 async def get_facility(fid: str):
-    f = await db.facilities.find_one({"id": fid, "is_demo": {"$ne": True}, "status": {"$ne": "inactive"}}, {"_id": 0})
+    f = await db.facilities.find_one(real_records('facilities', {"id": fid, "is_demo": {"$ne": True}, "status": {"$ne": "inactive"}}), {"_id": 0})
     if not f:
         raise HTTPException(404, "Facility not found")
     return f
@@ -464,7 +465,7 @@ async def facility_availability(fid: str, date: str):
       2. Existing confirmed bookings (a booked slot is unavailable)
       3. Default: all slots in operating hours (06:00-23:00) are available
     """
-    f = await db.facilities.find_one({"id": fid, "is_demo": {"$ne": True}, "status": {"$ne": "inactive"}}, {"_id": 0})
+    f = await db.facilities.find_one(real_records('facilities', {"id": fid, "is_demo": {"$ne": True}, "status": {"$ne": "inactive"}}), {"_id": 0})
     if not f:
         raise HTTPException(404, "Facility not found")
     slots = [f"{h:02d}:00-{h+1:02d}:00" for h in range(6, 23)]
@@ -477,7 +478,7 @@ async def facility_availability(fid: str, date: str):
 
     # Slot overrides created by Manager/Admin (block or explicit open)
     overrides_raw = await db.facility_slots.find(
-        {"facility_id": fid, "date": {"$in": [date, "*"]}}, {"_id": 0}
+        real_records('facility_slots', {"facility_id": fid, "date": {"$in": [date, "*"]}}), {"_id": 0}
     ).to_list(500)
     # Map (court_number, slot) -> status
     # A recurring or dated closure must agree with the booking write check.
@@ -567,11 +568,11 @@ async def payu_webhook(request: Request):
 # ---------------------------------------------------------------------------
 
 async def _enrich_game(g: dict) -> dict:
-    f = await db.facilities.find_one({"id": g["facility_id"]}, {"_id": 0, "name": 1, "area": 1, "city": 1, "image": 1})
+    f = await db.facilities.find_one(real_records('facilities', {"id": g["facility_id"]}), {"_id": 0, "name": 1, "area": 1, "city": 1, "image": 1})
     g["facility"] = f
-    host = await db.players.find_one({"id": g["host_id"]}, {"_id": 0})
+    host = await db.players.find_one(real_records('players', {"id": g["host_id"]}), {"_id": 0})
     if not host:
-        host = await db.users.find_one({"id": g["host_id"]}, {"_id": 0})
+        host = await db.users.find_one(real_records('users', {"id": g["host_id"]}), {"_id": 0})
     g["host"] = public_player(host)
     g["slots_remaining"] = g["max_players"] - len(g.get("current_players", []))
     return g
@@ -582,15 +583,15 @@ async def list_games(sport: Optional[str] = None, skill: Optional[str] = None, c
     if sport: q["sport"] = sport
     if skill: q["skill_level"] = skill
     q["is_demo"] = {"$ne": True}
-    games = await db.games.find(q, {"_id": 0}).to_list(200)
+    games = await db.games.find(real_records('games', q), {"_id": 0}).to_list(200)
     if city:
-        facility_ids = [f["id"] for f in await db.facilities.find({"city": city}, {"_id": 0, "id": 1}).to_list(100)]
+        facility_ids = [f["id"] for f in await db.facilities.find(real_records('facilities', {"city": city}), {"_id": 0, "id": 1}).to_list(100)]
         games = [g for g in games if g["facility_id"] in facility_ids]
     return [await _enrich_game(g) for g in games]
 
 @api.get("/games/{gid}")
 async def get_game(gid: str):
-    g = await db.games.find_one({"id": gid, "is_demo": {"$ne": True}}, {"_id": 0})
+    g = await db.games.find_one(real_records('games', {"id": gid, "is_demo": {"$ne": True}}), {"_id": 0})
     if not g: raise HTTPException(404, "Game not found")
     return await _enrich_game(g)
 
@@ -602,7 +603,7 @@ async def create_game(body: GameCreate, user=Depends(current_user)):
 
 @api.post("/games/{gid}/join")
 async def join_game(gid: str, user=Depends(current_user)):
-    g = await db.games.find_one({"id": gid}, {"_id": 0})
+    g = await db.games.find_one(real_records('games', {"id": gid}), {"_id": 0})
     if not g: raise KuviraError(404, "GAME_NOT_FOUND", "Game not found")
     if g.get("status") == "cancelled": raise KuviraError(400, "GAME_CANCELLED", "This game was cancelled")
     if user["id"] in g.get("current_players", []): return await _enrich_game(g)
@@ -610,7 +611,7 @@ async def join_game(gid: str, user=Depends(current_user)):
     if res.modified_count == 0: raise KuviraError(409, "GAME_FULL", "Game is full")
     try: await features.award_first_game_referral(user["id"])
     except Exception: log.exception("referral reward failed")
-    g = await db.games.find_one({"id": gid}, {"_id": 0}); return await _enrich_game(g)
+    g = await db.games.find_one(real_records('games', {"id": gid}), {"_id": 0}); return await _enrich_game(g)
 
 # ---------------------------------------------------------------------------
 # Players & matching
@@ -629,7 +630,7 @@ async def list_players(user=Depends(optional_user)):
     """Return real onboarded users as player cards for 'Players Near You'.
     Guest-safe public profile fields only; excludes demonstration data."""
     real_users = await db.users.find(
-        {"onboarded": True, "is_demo": {"$ne": True}, "id": {"$ne": user["id"] if user else None}},
+        real_records('users', {"onboarded": True, "is_demo": {"$ne": True}, "id": {"$ne": user["id"] if user else None}}),
         {"_id": 0, "id": 1, "name": 1, "avatar": 1, "city": 1, "state": 1,
          "area": 1, "primary_sport": 1, "skill_level": 1, "bio": 1,
          "playing_style": 1, "sports": 1}
@@ -637,15 +638,15 @@ async def list_players(user=Depends(optional_user)):
     for p in real_users:
         if user:
             p["match_score"] = _match_score(p, user)
-        p["matches_played"] = await db.games.count_documents({"current_players": p["id"]})
+        p["matches_played"] = await db.games.count_documents(real_records('games', {"current_players": p["id"]}))
         p["is_real_user"] = True
     real_users.sort(key=lambda x: -x.get("match_score", 0))
     return real_users
 @api.get("/players/{pid}")
 async def get_player(pid: str, user=Depends(optional_user)):
-    p = await db.users.find_one({"id": pid, "onboarded": True, "is_demo": {"$ne": True}}, {"_id": 0})
+    p = await db.users.find_one(real_records('users', {"id": pid, "onboarded": True, "is_demo": {"$ne": True}}), {"_id": 0})
     if not p:
-        p = await db.players.find_one({"id": pid, "is_demo": {"$ne": True}}, {"_id": 0})
+        p = await db.players.find_one(real_records('players', {"id": pid, "is_demo": {"$ne": True}}), {"_id": 0})
     if not p:
         raise HTTPException(404, "Player not found")
     if user:
@@ -653,10 +654,10 @@ async def get_player(pid: str, user=Depends(optional_user)):
     return public_player(p)
 
 @api.get("/coaches")
-async def list_coaches(city:Optional[str]=None): return await db.coaches.find({'city':city, 'is_demo': {'$ne': True}} if city else {'is_demo': {'$ne': True}},{'_id':0}).to_list(100)
+async def list_coaches(city:Optional[str]=None): return await db.coaches.find(real_records('coaches', {'city':city, 'is_demo': {'$ne': True}} if city else {'is_demo': {'$ne': True}}),{'_id':0}).to_list(100)
 @api.get("/coaches/{cid}")
 async def get_coach(cid:str):
-    c=await db.coaches.find_one({'id':cid, 'is_demo': {'$ne': True}},{'_id':0});
+    c=await db.coaches.find_one(real_records('coaches', {'id':cid, 'is_demo': {'$ne': True}}),{'_id':0});
     if not c: raise HTTPException(404,'Coach not found')
     return c
 @api.get('/events')
@@ -666,11 +667,11 @@ async def list_events(city: Optional[str] = None, published_only: bool = True):
     if city: q["city"] = city
     q["is_demo"] = {"$ne": True}
     q["status"] = "published"
-    return await db.events.find(q, {'_id': 0}).sort('date', 1).to_list(100)
+    return await db.events.find(real_records('events', q), {'_id': 0}).sort('date', 1).to_list(100)
 
 @api.get('/events/{eid}')
 async def get_event(eid: str):
-    e = await db.events.find_one({'id': eid, 'is_demo': {'$ne': True}, 'status': 'published'}, {'_id': 0})
+    e = await db.events.find_one(real_records('events', {'id': eid, 'is_demo': {'$ne': True}, 'status': 'published'}), {'_id': 0})
     if not e: raise HTTPException(404, 'Event not found')
     return e
 
@@ -681,17 +682,17 @@ async def list_tournaments(city: Optional[str] = None, published_only: bool = Tr
     if city: q["city"] = city
     q["is_demo"] = {"$ne": True}
     q["status"] = "published"
-    return await db.tournaments.find(q, {'_id': 0}).sort('date', 1).to_list(100)
+    return await db.tournaments.find(real_records('tournaments', q), {'_id': 0}).sort('date', 1).to_list(100)
 @api.get('/tournaments/{tid}')
 async def get_tournament(tid:str):
-    t=await db.tournaments.find_one({'id':tid, 'is_demo': {'$ne': True}, 'status': 'published'},{'_id':0});
+    t=await db.tournaments.find_one(real_records('tournaments', {'id':tid, 'is_demo': {'$ne': True}, 'status': 'published'}),{'_id':0});
     if not t: raise HTTPException(404,'Tournament not found')
     return t
 @api.post('/tournaments/{tid}/register')
 async def register_tournament(tid: str, body: Optional[PaymentContact] = None, user=Depends(current_user)):
     if PAYMENT_PROVIDER == "payu":
         return await reserve_tournament(db,tid,user,body.customer_email if body else None)
-    t = await db.tournaments.find_one({'id': tid}, {'_id': 0})
+    t = await db.tournaments.find_one(real_records('tournaments', {'id': tid}), {'_id': 0})
     if not t: raise HTTPException(404, 'Tournament not found')
     reg = {'id': gen_id(), 'user_id': user['id'], 'tournament_id': tid, 'status': 'pending_payment' if PAYMENT_PROVIDER == 'payu' else 'confirmed', 'payment': {'provider': 'payu', 'status': 'initiated', 'amount': t['entry_fee']} if PAYMENT_PROVIDER == 'payu' else {'provider': 'mock_payu', 'status': 'paid', 'amount': t['entry_fee']}, 'created_at': utcnow().isoformat()}
     await db.tournament_registrations.insert_one(reg.copy())
@@ -707,14 +708,14 @@ async def register_tournament(tid: str, body: Optional[PaymentContact] = None, u
         raise
 
 async def _enrich_post(p:dict,user_id:Optional[str])->dict:
-    author=await db.players.find_one({'id':p['author_id']},{'_id':0}) or await db.users.find_one({'id':p['author_id']},{'_id':0}); p['author']=public_player(author); p['liked']=bool(user_id and await db.post_likes.find_one({'post_id':p['id'],'user_id':user_id})); return p
+    author=await db.players.find_one(real_records('players', {'id':p['author_id']}),{'_id':0}) or await db.users.find_one(real_records('users', {'id':p['author_id']}),{'_id':0}); p['author']=public_player(author); p['liked']=bool(user_id and await db.post_likes.find_one({'post_id':p['id'],'user_id':user_id})); return p
 @api.get('/posts')
 async def list_posts(user=Depends(optional_user)):
     blocked=[]
     if user:
         blocks=await db.user_blocks.find({'$or':[{'user_id':user['id']},{'target_id':user['id']}]},{'_id':0}).to_list(1000)
         blocked=[b['target_id'] if b['user_id']==user['id'] else b['user_id'] for b in blocks]
-    items=await db.posts.find({'is_demo':{'$ne':True},'moderation_status':{'$ne':'hidden'},'author_id':{'$nin':blocked}},{'_id':0}).sort('created_at',-1).to_list(100)
+    items=await db.posts.find(real_records('posts', {'is_demo':{'$ne':True},'moderation_status':{'$ne':'hidden'},'author_id':{'$nin':blocked}}),{'_id':0}).sort('created_at',-1).to_list(100)
     return [await _enrich_post(p,user['id'] if user else None) for p in items]
 @api.post('/posts')
 async def create_post(body:PostCreate,user=Depends(current_user)):
@@ -734,15 +735,15 @@ async def list_products(category:Optional[str]=None,sport:Optional[str]=None):
     if category:q['category']=category
     if sport:q['sport']=sport
     q["is_demo"] = {"$ne": True}; q["status"] = "active"
-    return await db.products.find(q,{'_id':0}).to_list(200)
+    return await db.products.find(real_records('products', q),{'_id':0}).to_list(200)
 @api.get('/products/{pid}')
 async def get_product(pid:str):
-    p=await db.products.find_one({'id':pid, 'is_demo': {'$ne': True}, 'status': 'active'},{'_id':0});
+    p=await db.products.find_one(real_records('products', {'id':pid, 'is_demo': {'$ne': True}, 'status': 'active'}),{'_id':0});
     if not p: raise HTTPException(404,'Product not found')
     return p
 @api.get('/products/recommend/for-me')
 async def recommend_products(user=Depends(current_user)):
-    products=await db.products.find({'is_demo': {'$ne': True}, 'status': 'active'}, {'_id':0}).to_list(200); skill=user.get('skill_level','Beginner')
+    products=await db.products.find(real_records('products', {'is_demo': {'$ne': True}, 'status': 'active'}), {'_id':0}).to_list(200); skill=user.get('skill_level','Beginner')
     for p in products:
         s=50
         if skill in (p.get('recommended_skill') or ''): s+=20
@@ -753,7 +754,7 @@ async def recommend_products(user=Depends(current_user)):
 async def get_cart(user=Depends(current_user)):
     cart=await db.carts.find_one({'user_id':user['id']},{'_id':0}) or {'user_id':user['id'],'items':[]}; items=[]; total=0
     for it in cart.get('items',[]):
-        prod=await db.products.find_one({'id':it['product_id']},{'_id':0})
+        prod=await db.products.find_one(real_records('products', {'id':it['product_id']}),{'_id':0})
         if prod: items.append({'product':prod,'qty':it['qty'],'subtotal':prod['price']*it['qty']}); total+=prod['price']*it['qty']
     return {'items':items,'total':total,'count':sum(i['qty'] for i in cart.get('items',[]))}
 @api.post('/cart/add')
@@ -780,7 +781,7 @@ async def create_order(body: OrderCreate, user=Depends(current_user)):
     if not cart or not cart.get('items'): raise HTTPException(400, 'Cart is empty')
     line_items=[]; total=0
     for it in cart['items']:
-        prod=await db.products.find_one({'id':it['product_id']},{'_id':0})
+        prod=await db.products.find_one(real_records('products', {'id':it['product_id']}),{'_id':0})
         if prod: line_items.append({'product':prod,'qty':it['qty'],'subtotal':prod['price']*it['qty']}); total+=prod['price']*it['qty']
     order={'id':gen_id(),'user_id':user['id'],'items':line_items,'total':total,'address':body.address,'status':'pending_payment' if PAYMENT_PROVIDER == 'payu' else 'confirmed','payment':{'provider':'payu','status':'initiated','amount':total} if PAYMENT_PROVIDER == 'payu' else {'provider':'mock_payu','status':'paid','amount':total},'created_at':utcnow().isoformat()}
     await db.orders.insert_one(order.copy())
@@ -835,7 +836,7 @@ async def ai_insights(user=Depends(current_user)):
     """Real, per-user activity — never fabricated. Qualitative AI fields stay
     null until the user has actual analyzed-match data (AI Coach video reports)."""
     uid = user["id"]
-    matches_played = await db.games.count_documents({"current_players": uid})
+    matches_played = await db.games.count_documents(real_records('games', {"current_players": uid}))
     bookings_count = await db.bookings.count_documents({"user_id": uid})
     sessions_count = await db.coach_sessions.count_documents({"user_id": uid})
     try:
@@ -862,15 +863,15 @@ async def ai_insights(user=Depends(current_user)):
     }
 @api.get('/ai/recommendations')
 async def ai_recommendations(user=Depends(current_user)):
-    products=await db.products.find({'is_demo': {'$ne': True}, 'status': 'active'}, {'_id':0}).to_list(6); games=await db.games.find({'is_demo': {'$ne': True}}, {'_id':0}).to_list(4); return {'insight':None,'products':products[:3],'games':[await _enrich_game(g) for g in games[:3]]}
+    products=await db.products.find(real_records('products', {'is_demo': {'$ne': True}, 'status': 'active'}), {'_id':0}).to_list(6); games=await db.games.find(real_records('games', {'is_demo': {'$ne': True}}), {'_id':0}).to_list(4); return {'insight':None,'products':products[:3],'games':[await _enrich_game(g) for g in games[:3]]}
 
 @api.get('/search')
 async def search(q: str):
     q_lower = q.lower()
-    facilities = [f for f in await db.facilities.find({'is_demo': {'$ne': True}, 'status': {'$ne': 'inactive'}}, {'_id': 0}).to_list(200) if q_lower in f['name'].lower() or q_lower in f.get('area', '').lower() or q_lower in f.get('city', '').lower()]
-    players = [p for p in await db.users.find({'onboarded': True, 'is_demo': {'$ne': True}}, {'_id': 0, 'id': 1, 'name': 1, 'avatar': 1, 'city': 1, 'area': 1, 'skill_level': 1, 'primary_sport': 1}).to_list(200) if q_lower in (p.get('name') or '').lower()]
-    products = [p for p in await db.products.find({'is_demo': {'$ne': True}, 'status': 'active'}, {'_id': 0}).to_list(200) if q_lower in p['name'].lower() or q_lower in p.get('category', '').lower()]
-    events = [e for e in await db.events.find({'is_demo': {'$ne': True}, 'status': 'published'}, {'_id': 0}).to_list(100) if q_lower in e['name'].lower()]
+    facilities = [f for f in await db.facilities.find(real_records('facilities', {'is_demo': {'$ne': True}, 'status': {'$ne': 'inactive'}}), {'_id': 0}).to_list(200) if q_lower in f['name'].lower() or q_lower in f.get('area', '').lower() or q_lower in f.get('city', '').lower()]
+    players = [p for p in await db.users.find(real_records('users', {'onboarded': True, 'is_demo': {'$ne': True}}), {'_id': 0, 'id': 1, 'name': 1, 'avatar': 1, 'city': 1, 'area': 1, 'skill_level': 1, 'primary_sport': 1}).to_list(200) if q_lower in (p.get('name') or '').lower()]
+    products = [p for p in await db.products.find(real_records('products', {'is_demo': {'$ne': True}, 'status': 'active'}), {'_id': 0}).to_list(200) if q_lower in p['name'].lower() or q_lower in p.get('category', '').lower()]
+    events = [e for e in await db.events.find(real_records('events', {'is_demo': {'$ne': True}, 'status': 'published'}), {'_id': 0}).to_list(100) if q_lower in e['name'].lower()]
     return {'facilities': facilities[:8], 'players': players[:8], 'products': products[:8], 'events': events[:8]}
 
 # ---------------------------------------------------------------------------
