@@ -42,8 +42,10 @@ jobs:
           filters: |
             api:
               - 'backend/**'
+              - '.github/workflows/deploy-gcp.yml'
             web:
               - 'frontend/**'
+              - '.github/workflows/deploy-gcp.yml'
 
   deploy-api:
     needs: changes
