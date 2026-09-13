@@ -1,31 +1,305 @@
-import { useEffect, useState } from 'react';
-import { View, Text, TextInput, useWindowDimensions } from 'react-native';
-import { useRouter } from 'expo-router';
-import { api } from '@/src/api';
-import { c } from '@/src/theme';
-import { Brand } from './brand';
-import { Card, Button, Badge } from './ui';
-import { ErrorBanner, SkeletonCards } from './states';
-import { dateLabel } from '@/src/sports';
-export function AdminOverview() {
-  const router = useRouter(); const { width } = useWindowDimensions(); const wide = width >= 768;
-  const [overview, setOverview] = useState<any>(); const [users, setUsers] = useState<any[]>([]); const [transactions, setTransactions] = useState<any[]>([]); const [health, setHealth] = useState<any>(); const [error, setError] = useState<unknown>(); const [query, setQuery] = useState(''); const [busy, setBusy] = useState(false);
+import { useEffect, useState } from "react";
+import { View, Text, TextInput } from "react-native";
+import { useRouter } from "expo-router";
+import { api } from "@/src/api";
+import { c } from "@/src/theme";
+import { Card, Button } from "./ui";
+import { ErrorBanner, SkeletonCards } from "./states";
+import { DataRows, WorkspaceEditor } from "./workspace";
+export function AdminOverview({ section = "overview" }: { section?: string }) {
+  const router = useRouter();
+  const [data, setData] = useState<any>();
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState<unknown>();
+  const [busy, setBusy] = useState(false);
+  const [grant, setGrant] = useState<any>();
+  const [refreshResult, setRefreshResult] = useState("");
   async function load() {
-    setBusy(true); setError(null);
-    const results = await Promise.allSettled([api.adminOverview(), api.adminUsers(query), api.adminTransactions(), api.adminSystemHealth()]);
-    const setters = [setOverview, setUsers, setTransactions, setHealth];
-    results.forEach((r, i) => { if (r.status === 'fulfilled') setters[i](r.value); });
-    if (results.some(r => r.status === 'rejected')) setError('Some dashboard data is unavailable. Retry to refresh it.'); setBusy(false);
+    setBusy(true);
+    setError(null);
+    try {
+      setData(
+        await (section === "users"
+          ? api.adminUsers(query)
+          : section === "finance"
+            ? api.adminTransactions()
+            : section === "system"
+              ? api.adminSystemHealth()
+              : section === "issues"
+                ? api.adminIssues()
+                : section === "audit"
+                  ? api.adminAudit()
+                  : api.adminOverview()),
+      );
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
   }
-  useEffect(() => { load(); }, []);
-  const received = overview?.payments?.find((p: any) => p._id === 'succeeded')?.amount;
-  return <View style={{ gap: 20 }}><Brand /><Text accessibilityRole="header" style={{ fontSize: 30, color: c.text, fontWeight: '900' }}>The whole game, in view.</Text><Text style={{ color: c.textSecondary }}>Platform overview · {overview ? dateLabel(overview.generated_at) : 'Loading latest data'}</Text><ErrorBanner error={error} retry={load} />{busy && !overview ? <SkeletonCards /> : <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>{Object.entries(overview?.counts || {}).map(([key, value]) => <Card key={key} style={{ width: wide ? '30%' : '46%', minHeight: 100 }}><Text style={{ color: c.textSecondary, textTransform: 'capitalize', fontSize: 13 }}>{key.replace('ai_coach_jobs', 'AI analyses').replace('organizations', 'Clubs')}</Text><Text style={{ fontWeight: '900', fontSize: 30, color: c.text }}>{String(value)}</Text></Card>)}<Card style={{ width: wide ? '30%' : '46%' }}><Text style={{ color: c.textSecondary }}>Verified gateway receipts</Text><Text style={{ fontSize: 24, fontWeight: '900', color: c.text }}>{received == null ? '—' : `₹${received.toLocaleString('en-IN')}`}</Text></Card></View>}
-    <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>Players & accounts</Text><View style={{ flexDirection: 'row', gap: 10 }}><TextInput accessibilityLabel="Search users by name or phone" value={query} onChangeText={setQuery} onSubmitEditing={load} placeholder="Search name or phone" style={{ flex: 1, minWidth: 0, backgroundColor: 'white', padding: 14, borderRadius: 14, color: c.text }} /><Button label="Search" onPress={load} loading={busy} fullWidth={false} /></View>
-    <Text style={{ color: c.textMuted }}>Up to 100 recent accounts. Club roles are managed in each club’s team workspace.</Text>
-    {users.map(u => <Card key={u.id}><View style={{ flexDirection: wide ? 'row' : 'column', gap: 12, alignItems: wide ? 'center' : undefined }}><View style={{ flex: 1 }}><Text style={{ color: c.text, fontWeight: '800', fontSize: 16 }}>{u.name || 'New player'}</Text><Text style={{ color: c.textSecondary }}>{u.mobile} · {u.city || 'City not set'}</Text></View><Badge label={u.is_platform_admin ? 'Platform admin' : u.onboarded ? 'Player' : 'Onboarding'} /><Button label="View profile" variant="secondary" fullWidth={false} onPress={() => router.push(`/player/${u.id}`)} /></View></Card>)}
-    <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>Finance</Text><Text style={{ color: c.textSecondary }}>Latest 100 gateway transactions. Refund and reconciliation actions are not available in this backend.</Text>
-    {wide && <View style={{ flexDirection: 'row', padding: 16, gap: 16 }}>{['Transaction', 'Amount', 'Status', 'Created'].map(k => <Text key={k} style={{ flex: 1, fontWeight: '800', color: c.text }}>{k}</Text>)}</View>}
-    {transactions.length ? transactions.map(t => <Card key={t.id}><View style={{ flexDirection: wide ? 'row' : 'column', gap: 12 }}><Text style={{ flex: 1, color: c.text }}>{t.txnid || t.id}</Text><Text style={{ flex: 1, color: c.text }}>₹{t.amount}</Text><View style={{ flex: 1 }}><Badge label={t.status || 'Unknown'} /></View><Text style={{ flex: 1, color: c.textSecondary }}>{dateLabel(t.created_at)}</Text></View></Card>) : <Text style={{ color: c.textMuted }}>No transactions loaded.</Text>}
-    <Text style={{ fontSize: 22, fontWeight: '800', color: c.text }}>System health</Text><Card><View style={{ gap: 10 }}><Text style={{ color: c.text }}>API: {health?.api || 'Unavailable'} · Database: {health?.database || 'Unavailable'}</Text><Text style={{ color: c.textSecondary }}>Last worker observation: {health?.worker_last_observation ? dateLabel(health.worker_last_observation.heartbeat_at) : 'None recorded'}</Text><Text style={{ color: c.textSecondary }}>Worker heartbeat freshness and knowledge refresh are not monitored by the current backend.</Text>{overview?.ai_jobs?.map((job: any) => <Text key={job._id || 'unknown'} style={{ color: c.text }}>AI {job._id || 'unknown'}: {job.count}</Text>)}</View></Card><Button label="Refresh dashboard" onPress={load} loading={busy} variant="secondary" />
-  </View>;
+  useEffect(() => {
+    load();
+  }, [section]);
+  const titles: Record<string, string> = {
+    overview: "The whole game, in view.",
+    users: "Players & accounts",
+    finance: "Payment transactions",
+    system: "System health",
+    issues: "Venue issues",
+    audit: "Platform audit history",
+  };
+  return (
+    <View style={{ gap: 20 }}>
+      <Text
+        accessibilityRole="header"
+        style={{ fontSize: 28, fontWeight: "900", color: c.text }}
+      >
+        {titles[section]}
+      </Text>
+      <ErrorBanner error={error} retry={load} />
+      {busy && !data ? <SkeletonCards /> : null}
+      {section === "overview" && (
+        <>
+          <Text style={{ color: c.textSecondary }}>
+            Live platform totals. Gateway receipts include verified successful
+            payments.
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            {Object.entries(data?.counts || {}).map(([key, value]) => (
+              <Card
+                key={key}
+                style={{ flexBasis: 200, flexGrow: 1, minHeight: 120 }}
+              >
+                <Text
+                  style={{
+                    color: c.textSecondary,
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {key
+                    .replace("organizations", "Clubs")
+                    .replace("ai_coach_jobs", "AI analyses")}
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 32,
+                    fontWeight: "900",
+                    color: c.text,
+                    marginTop: 12,
+                  }}
+                >
+                  {String(value)}
+                </Text>
+              </Card>
+            ))}
+          </View>
+          <DataRows
+            rows={data?.payments || []}
+            columns={[
+              { key: "_id", label: "Payment status" },
+              { key: "count", label: "Transactions" },
+              {
+                key: "amount",
+                label: "Value (₹)",
+                render: (r) => Number(r.amount || 0).toLocaleString("en-IN"),
+              },
+            ]}
+          />
+          <Text style={{ fontSize: 20, fontWeight: "800", color: c.text }}>
+            AI analysis queue
+          </Text>
+          <DataRows
+            rows={data?.ai_jobs || []}
+            columns={[
+              { key: "_id", label: "Status" },
+              { key: "count", label: "Analyses" },
+            ]}
+          />
+        </>
+      )}
+      {section === "users" && (
+        <>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <TextInput
+              accessibilityLabel="Search users"
+              value={query}
+              onChangeText={setQuery}
+              onSubmitEditing={load}
+              placeholder="Name or phone"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: 14,
+                backgroundColor: "white",
+                borderWidth: 1,
+                borderColor: "#CBD5E1",
+                borderRadius: 12,
+                color: c.text,
+                fontSize: 16,
+              }}
+            />
+            <Button
+              label="Search"
+              fullWidth={false}
+              onPress={load}
+              loading={busy}
+            />
+          </View>
+          <Text style={{ color: c.textSecondary }}>
+            Latest 100 matching accounts. Manage club roles from the club’s Team
+            section.
+          </Text>
+          <DataRows
+            rows={data || []}
+            columns={[
+              { key: "name", label: "Name" },
+              { key: "mobile", label: "Phone" },
+              { key: "city", label: "City" },
+              {
+                key: "is_platform_admin",
+                label: "Access",
+                render: (u) =>
+                  u.is_platform_admin ? "Platform admin" : "Player",
+              },
+            ]}
+            actions={(u) => (
+              <>
+                <Button
+                  label="Profile"
+                  fullWidth={false}
+                  variant="secondary"
+                  onPress={() => router.push(`/player/${u.id}`)}
+                />
+                {!u.is_platform_admin && (
+                  <Button
+                    label="Grant platform role"
+                    variant="secondary"
+                    fullWidth={false}
+                    onPress={() => setGrant(u)}
+                  />
+                )}
+              </>
+            )}
+          />
+        </>
+      )}
+      {section === "finance" && (
+        <>
+          <Text style={{ color: c.textSecondary }}>
+            Latest 100 transactions. Cancelling a booking does not issue a
+            refund. Reconcile refunds through the payment provider.
+          </Text>
+          <DataRows
+            rows={data || []}
+            columns={[
+              {
+                key: "txnid",
+                label: "Transaction",
+                render: (t) => t.txnid || t.id,
+              },
+              { key: "amount", label: "Amount (₹)" },
+              { key: "status", label: "Status" },
+              { key: "created_at", label: "Created" },
+            ]}
+          />
+        </>
+      )}
+      {section === "system" && (
+        <Card>
+          <Text style={{ color: c.text, fontSize: 18, fontWeight: "800" }}>
+            Service observations
+          </Text>
+          <Text style={{ color: c.textSecondary, marginTop: 12 }}>
+            API: {data?.api || "Unavailable"}
+          </Text>
+          <Text style={{ color: c.textSecondary, marginTop: 12 }}>
+            Database: {data?.database || "Unavailable"}
+          </Text>
+          <Text style={{ color: c.textSecondary, marginTop: 12 }}>
+            Last worker heartbeat:{" "}
+            {data?.worker_last_observation?.heartbeat_at || "None recorded"}
+          </Text>
+          <Text style={{ color: c.textSecondary, marginTop: 12 }}>
+            An observed heartbeat is not a live worker health check.
+          </Text>
+          <Button
+            label="Refresh coaching knowledge"
+            variant="secondary"
+            loading={busy}
+            onPress={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                const result = await api.aiCoach.seedKnowledge();
+                setRefreshResult(JSON.stringify(result));
+              } catch (e) {
+                setError(e);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+          {refreshResult ? (
+            <Text style={{ color: c.textSecondary }}>{refreshResult}</Text>
+          ) : null}
+        </Card>
+      )}
+      {section === "issues" && (
+        <DataRows
+          rows={data || []}
+          columns={[
+            { key: "org_id", label: "Club" },
+            { key: "title", label: "Issue" },
+            { key: "status", label: "Status" },
+            { key: "created_at", label: "Reported" },
+          ]}
+          actions={(i) => (
+            <Button
+              label="Open club"
+              fullWidth={false}
+              variant="secondary"
+              onPress={() => router.push(`/club/${i.org_id}`)}
+            />
+          )}
+        />
+      )}
+      {section === "audit" && (
+        <DataRows
+          rows={data || []}
+          columns={[
+            { key: "org_id", label: "Club" },
+            { key: "action", label: "Action" },
+            { key: "actor_id", label: "Actor" },
+            { key: "created_at", label: "Time" },
+          ]}
+        />
+      )}
+      {grant && (
+        <WorkspaceEditor
+          title="Grant platform administrator"
+          context={grant.name || grant.mobile || grant.id}
+          fields={[
+            {
+              key: "confirmation",
+              label: "Type GRANT to give full platform access",
+              required: true,
+            },
+          ]}
+          save={async (v) => {
+            if (v.confirmation !== "GRANT")
+              throw new Error("Type GRANT to continue.");
+            await api.adminGrantRole(grant.id);
+            await load();
+          }}
+          close={() => setGrant(undefined)}
+        />
+      )}
+      <Button
+        label="Refresh"
+        loading={busy}
+        variant="secondary"
+        onPress={load}
+      />
+    </View>
+  );
 }

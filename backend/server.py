@@ -34,6 +34,7 @@ from deps import (
 import otp_service
 import features
 import org_admin
+from public_profiles import public_player
 from payments import PayU, checkout_html, create_checkout, process_callback
 from profile_media import ProfileMediaStorage
 
@@ -612,7 +613,7 @@ async def _enrich_game(g: dict) -> dict:
     host = await db.players.find_one({"id": g["host_id"]}, {"_id": 0})
     if not host:
         host = await db.users.find_one({"id": g["host_id"]}, {"_id": 0})
-    g["host"] = host
+    g["host"] = public_player(host)
     g["slots_remaining"] = g["max_players"] - len(g.get("current_players", []))
     return g
 
@@ -690,7 +691,7 @@ async def get_player(pid: str, user=Depends(optional_user)):
         raise HTTPException(404, "Player not found")
     if user:
         p["match_score"] = _match_score(p, user)
-    return {key: value for key, value in p.items() if key in {"id", "name", "avatar", "city", "area", "primary_sport", "sports", "skill_level", "bio", "playing_style", "match_score", "matches_played", "availability"}}
+    return public_player(p)
 
 @api.get("/coaches")
 async def list_coaches(city:Optional[str]=None): return await db.coaches.find({'city':city, 'is_demo': {'$ne': True}} if city else {'is_demo': {'$ne': True}},{'_id':0}).to_list(100)
@@ -745,7 +746,7 @@ async def register_tournament(tid: str, body: Optional[PaymentContact] = None, u
         raise
 
 async def _enrich_post(p:dict,user_id:Optional[str])->dict:
-    author=await db.players.find_one({'id':p['author_id']},{'_id':0}) or await db.users.find_one({'id':p['author_id']},{'_id':0}); p['author']=author; p['liked']=bool(user_id and await db.post_likes.find_one({'post_id':p['id'],'user_id':user_id})); return p
+    author=await db.players.find_one({'id':p['author_id']},{'_id':0}) or await db.users.find_one({'id':p['author_id']},{'_id':0}); p['author']=public_player(author); p['liked']=bool(user_id and await db.post_likes.find_one({'post_id':p['id'],'user_id':user_id})); return p
 @api.get('/posts')
 async def list_posts(user=Depends(optional_user)):
     items=await db.posts.find({'is_demo': {'$ne': True}}, {'_id':0}).sort('created_at',-1).to_list(100); return [await _enrich_post(p,user['id'] if user else None) for p in items]

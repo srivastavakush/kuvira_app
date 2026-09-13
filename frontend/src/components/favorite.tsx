@@ -6,7 +6,6 @@ import { useRouter } from 'expo-router';
 import { useSession } from '@/src/session';
 import { requireAuth } from '@/src/auth-gate';
 import { c } from '@/src/theme';
-import { getToken } from '@/src/api';
 export function FavoriteButton({ id }: { id: string }) {
   const { user } = useSession(); const router = useRouter(); const [saved, setSaved] = useState(false); const [busy, setBusy] = useState(false);
   useEffect(() => { let active = true; setSaved(false); if (user) AsyncStorage.getItem(`matchdrome:favourite:${user.id}:${id}`).then(v => { if (active) setSaved(v === '1'); }).catch(() => {}); return () => { active = false; }; }, [user?.id, id]);

@@ -193,7 +193,7 @@ class AgenticCoachWorkflow:
             "citations": {"type": "array", "items": {"type": "string"}},
         }, "required": ["reply", "match_summary", "data_quality_summary", "unavailable", "citations"]}
         return await self.provider.generate_structured_analysis(
-            system="You are Kuvira's evidence-first agentic sports coach. Use only supplied evidence. Do not fabricate.",
+            system="You are MatchDrome's evidence-first agentic sports coach. Use only supplied evidence. Do not fabricate.",
             user=json.dumps(prompt, default=str), schema=schema)
 
     @staticmethod

@@ -1,794 +1,1012 @@
-import { Brand } from '@/src/components/brand';
-import { SportPicker } from '@/src/components/sport-picker';
-import { Button } from '@/src/components/ui';
-import { useEffect, useState, useRef } from 'react';
-import { Alert, TextInput, View, Text, ScrollView, StyleSheet, Pressable, Switch, Modal } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, font, radius } from '@/src/theme';
-import { Loader } from '@/src/components/ui';
-import { api } from '@/src/api';
-import { useCapabilities } from '@/src/hooks/use-capabilities';
-import { roleLabel } from '@/src/capabilities';
+import { useEffect, useRef, useState } from "react";
+import { View, Text, ScrollView, TextInput, Share, Platform } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { api } from "@/src/api";
+import { useCapabilities } from "@/src/hooks/use-capabilities";
+import { roleLabel } from "@/src/capabilities";
+import { Button, Card, Loader } from "@/src/components/ui";
+import { ErrorBanner } from "@/src/components/states";
+import {
+  WorkspaceNav,
+  WorkspaceHeading,
+  WorkspaceEditor,
+  DataRows,
+  Field,
+  workspaceStyles,
+} from "@/src/components/workspace";
+import { c } from "@/src/theme";
 
-type TabKey = 'overview' | 'courts' | 'slots' | 'bookings' | 'events' | 'team' | 'settings';
-
+const sports = [
+  "badminton",
+  "cricket",
+  "football",
+  "tennis",
+  "pickleball",
+  "padel",
+  "basketball",
+  "other",
+].map((s) => ({ value: `sport-${s}`, label: s[0].toUpperCase() + s.slice(1) }));
+const name: Field = { key: "name", label: "Name", required: true };
+const sport: Field = {
+  key: "sport",
+  label: "Sport",
+  required: true,
+  options: sports,
+};
+const status: Field = {
+  key: "status",
+  label: "Publish state",
+  required: true,
+  options: ["draft", "published", "cancelled"].map((value) => ({
+    value,
+    label: value,
+  })),
+};
+const roles: Field = {
+  key: "role",
+  label: "Club role",
+  required: true,
+  options: ["CLUB_ADMIN", "CLUB_MANAGER", "CLUB_STAFF"].map((value) => ({
+    value,
+    label: roleLabel(value as any),
+  })),
+};
+const date: Field = { key: "date", label: "Date (YYYY-MM-DD)", required: true };
+const eventFields: Field[] = [
+  name,
+  date,
+  sport,
+  { key: "description", label: "Description", multiline: true },
+  { key: "image", label: "Image URL", image: true },
+  { key: "max_participants", label: "Capacity", numeric: true, required: true },
+  status,
+];
+const courtFields: Field[] = [
+  name,
+  { key: "city", label: "City", required: true },
+  { key: "area", label: "Area", required: true },
+  { key: "address", label: "Address" },
+  sport,
+  {
+    key: "courts_count",
+    label: "Number of courts",
+    numeric: true,
+    required: true,
+  },
+  {
+    key: "price_per_hour",
+    label: "Hourly price (₹)",
+    numeric: true,
+    required: true,
+  },
+  { key: "image", label: "Image URL", image: true },
+  { key: "description", label: "Description", multiline: true },
+];
+const today = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+type Editor = {
+  title: string;
+  fields: Field[];
+  initial?: any;
+  save: (v: any) => Promise<any>;
+};
 export default function ClubWorkspace() {
   const { orgId } = useLocalSearchParams<{ orgId: string }>();
+  const id = String(orgId);
   const router = useRouter();
-  const { capabilities, loading: capsLoading, roleForOrg, canForOrg } = useCapabilities();
-
-  const loadVersion = useRef(0);
-  const [selectedSport, setSelectedSport] = useState('badminton');
-  const [tab, setTab] = useState<TabKey>('overview');
-  const [org, setOrg] = useState<any>(null);
-  const [analytics, setAnalytics] = useState<any>(null);
-  const [facilities, setFacilities] = useState<any[]>([]);
-  const [bookings, setBookings] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
-  const [events, setEvents] = useState<any[]>([]);
-  const [tournaments, setTournaments] = useState<any[]>([]);
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  // Forms
-  const [staffMobile, setStaffMobile] = useState('');
-  const [staffRole, setStaffRole] = useState<'CLUB_ADMIN' | 'CLUB_MANAGER' | 'CLUB_STAFF'>('CLUB_STAFF');
-  const [transferMobile, setTransferMobile] = useState('');
-
-  // New Court Modal / State
-  const [showAddCourt, setShowAddCourt] = useState(false);
-  const [newCourtName, setNewCourtName] = useState('');
-  const [newCourtArea, setNewCourtArea] = useState('');
-  const [newCourtCount, setNewCourtCount] = useState('1');
-  const [newCourtPrice, setNewCourtPrice] = useState('600');
-
-  // Slot management
-  const [selectedFacilityId, setSelectedFacilityId] = useState<string>('');
-  const [selectedCourtNum, setSelectedCourtNum] = useState<number>(1);
-  const [slotDate, setSlotDate] = useState(new Date().toISOString().slice(0, 10));
-  const [customSlots, setCustomSlots] = useState<any[]>([]);
-  const [blockSlotTime, setBlockSlotTime] = useState('09:00-10:00');
-
-  // New Event Modal / State
-  const [showAddEvent, setShowAddEvent] = useState(false);
-  const [eventName, setEventName] = useState('');
-  const [eventDate, setEventDate] = useState(new Date().toISOString().slice(0, 10));
-  const [eventPrice, setEventPrice] = useState('500');
-  const [eventType, setEventType] = useState('Social Mixer');
-  const [eventStatus, setEventStatus] = useState<'draft' | 'published'>('published');
-
-  const currentOrgId = String(orgId);
-  const role = roleForOrg(currentOrgId);
-  const canView = canForOrg(currentOrgId, 'club.view');
-  const canManageClub = canForOrg(currentOrgId, 'club.manage');
-  const canCourtsCreate = canForOrg(currentOrgId, 'club.courts.create');
-  const canCourtsEdit = canForOrg(currentOrgId, 'club.courts.edit');
-  const canCourtsDelete = canForOrg(currentOrgId, 'club.courts.delete');
-  const canSlotsManage = canForOrg(currentOrgId, 'club.slots.manage');
-  const canBookingsManage = canForOrg(currentOrgId, 'club.bookings.manage');
-  const canBookingsConfirm = canForOrg(currentOrgId, 'club.bookings.confirm');
-  const canBookingsCancel = canForOrg(currentOrgId, 'club.bookings.cancel');
-  const canEventsManage = canForOrg(currentOrgId, 'club.events.manage');
-  const canStaff = canForOrg(currentOrgId, 'club.staff.manage');
-  const canTransfer = canForOrg(currentOrgId, 'club.ownership.transfer');
-  const canAnalytics = canForOrg(currentOrgId, 'club.analytics.view');
-
-  const reloadAll = async () => {
-    const version = ++loadVersion.current;
-    setErr(null);
-    try {
-      const results = await Promise.allSettled([
-        api.org(currentOrgId), canAnalytics ? api.orgAnalytics(currentOrgId) : Promise.resolve(null),
-        api.orgFacilities(currentOrgId), canBookingsManage ? api.orgBookings(currentOrgId) : Promise.resolve([]),
-        canStaff ? api.orgMembers(currentOrgId) : Promise.resolve([]),
-        canEventsManage ? api.orgEvents(currentOrgId) : Promise.resolve([]),
-        canEventsManage ? api.orgTournaments(currentOrgId) : Promise.resolve([]),
-        canManageClub ? api.orgAuditLog(currentOrgId) : Promise.resolve({ entries: [] }),
-      ]);
-      if (version !== loadVersion.current) return;
-      const setters = [setOrg, setAnalytics, setFacilities, setBookings, setMembers, setEvents, setTournaments];
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          if (index < 7) setters[index](result.value);
-          else setAuditLogs(result.value?.entries || []);
-        }
-      });
-      if (results[2].status === 'fulfilled' && results[2].value?.length && !selectedFacilityId) setSelectedFacilityId(results[2].value[0].id);
-      if (results.some(r => r.status === 'rejected')) setErr('Some club data couldn’t load. Please retry before making changes.');
-    } catch (e: any) { if (version === loadVersion.current) setErr(e.message || 'Club unavailable'); }
-  };
-
+  const {
+    loading: authLoading,
+    capabilities,
+    canForOrg,
+    roleForOrg,
+  } = useCapabilities();
+  const can = (p: string) => canForOrg(id, `club.${p}`);
+  const [tab, setTab] = useState("overview");
+  const [org, setOrg] = useState<any>();
+  const [data, setData] = useState<Record<string, any>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>();
+  const [notice, setNotice] = useState("");
+  const [editor, setEditor] = useState<Editor>();
+  const [query, setQuery] = useState("");
+  const [day, setDay] = useState("");
+  const [facility, setFacility] = useState("");
+  const version = useRef(0);
+  const permitted = can("view");
+  const financial = can("manage");
+  const nav = [
+    { key: "overview", label: "Overview" },
+    { key: "bookings", label: "Bookings & check-in" },
+    { key: "courts", label: "Courts" },
+    ...(can("slots.manage") ? [{ key: "slots", label: "Schedule" }] : []),
+    ...(can("games.manage") ? [{ key: "games", label: "Open games" }] : []),
+    ...(can("events.manage")
+      ? [
+          { key: "events", label: "Events" },
+          { key: "tournaments", label: "Tournaments" },
+        ]
+      : []),
+    ...(can("staff.manage") ? [{ key: "team", label: "Team" }] : []),
+    { key: "issues", label: "Venue issues" },
+    ...(financial
+      ? [
+          { key: "settings", label: "Settings" },
+          { key: "audit", label: "Audit history" },
+        ]
+      : []),
+  ];
+  async function load() {
+    const v = ++version.current;
+    setLoading(true);
+    setError(null);
+    const jobs: [string, Promise<any>][] = [
+      ["org", api.org(id)],
+      ["courts", api.orgFacilities(id)],
+      ["bookings", api.orgBookings(id)],
+    ];
+    if (can("analytics.view")) jobs.push(["analytics", api.orgAnalytics(id)]);
+    if (can("events.manage"))
+      jobs.push(
+        ["events", api.orgEvents(id)],
+        ["tournaments", api.orgTournaments(id)],
+      );
+    if (can("staff.manage")) jobs.push(["team", api.orgMembers(id)]);
+    if (financial) jobs.push(["audit", api.orgAuditLog(id)]);
+    if (can("games.manage")) jobs.push(["games", api.orgGames(id)]);
+    jobs.push(["issues", api.orgIssues(id)]);
+    const res = await Promise.allSettled(jobs.map((j) => j[1]));
+    if (v !== version.current) return;
+    const next: Record<string, any> = {};
+    res.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        if (jobs[i][0] === "org") setOrg(r.value);
+        else next[jobs[i][0]] = r.value;
+      }
+    });
+    setData(next);
+    if (res.some((r) => r.status === "rejected"))
+      setError(
+        "Some workspace data could not load. Retry before making changes.",
+      );
+    setLoading(false);
+  }
   useEffect(() => {
-    if (capsLoading) return;
-    if (!canView) {
-      setErr('You do not have access to this club workspace.');
-      return;
-    }
-    setOrg(null); setFacilities([]); setBookings([]); setMembers([]); setEvents([]); setTournaments([]); setAnalytics(null); setSelectedFacilityId(''); setShowAddCourt(false); setShowAddEvent(false); setTab('overview');
-    reloadAll();
-    return () => { loadVersion.current++; };
-  }, [currentOrgId, capsLoading, canView]);
-
-  useEffect(() => {
-    if (selectedFacilityId) {
-      api.orgListSlots(currentOrgId, selectedFacilityId, slotDate)
-        .then((res) => setCustomSlots(res?.slots || []))
-        .catch(() => setCustomSlots([]));
-    }
-  }, [selectedFacilityId, slotDate]);
-
-  // Actions
-  async function handleAddCourt() {
-    if (!canCourtsCreate || !newCourtName.trim()) return;
-    setBusy(true);
-    try {
-      await api.orgCreateFacility(currentOrgId, {
-        name: newCourtName.trim(),
-        city: org?.city || 'Bangalore',
-        area: newCourtArea.trim() || org?.city || 'Downtown',
-        courts_count: parseInt(newCourtCount) || 1,
-        price_per_hour: parseInt(newCourtPrice) || 600,
-        sports: [`sport-${selectedSport}`],
-      });
-      setShowAddCourt(false);
-      setNewCourtName('');
-      setNewCourtArea('');
-      await reloadAll();
-      Alert.alert('Court created', 'The court is now live for bookings.');
-    } catch (e: any) {
-      Alert.alert('Failed to add court', e.message);
-    } finally {
-      setBusy(false);
-    }
+    setOrg(undefined);
+    setData({});
+    setEditor(undefined);
+    setTab("overview");
+    setFacility("");
+    setQuery("");
+    setDay("");
+    if (!authLoading && permitted) load();
+    return () => {
+      version.current++;
+    };
+  }, [id, authLoading, JSON.stringify(capabilities)]);
+  const courts: any[] = data.courts || [];
+  const bookings: any[] = data.bookings || [];
+  const filtered = bookings.filter(
+    (b) =>
+      (!day || b.date?.slice(0, 10) === day) &&
+      JSON.stringify([b.id, b.user_name, b.user_id, b.slot, b.court_number])
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+  );
+  async function done(fn: () => Promise<any>) {
+    await fn();
+    setNotice("Changes saved.");
+    await load();
   }
-
-  async function handleDeleteCourt(fid: string) {
-    if (!canCourtsDelete) return;
-    Alert.alert('Deactivate court?', 'This court will be hidden from new bookings.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Deactivate',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.orgDeleteFacility(currentOrgId, fid);
-            await reloadAll();
-          } catch (e: any) {
-            Alert.alert('Error', e.message);
-          }
-        },
+  function edit(
+    title: string,
+    fields: Field[],
+    initial: any,
+    save: (v: any) => Promise<any>,
+  ) {
+    setEditor({
+      title,
+      fields,
+      initial,
+      save: async (v) => {
+        if (v.date && !(title === "Court availability" && v.date === "*") && !/^\d{4}-\d{2}-\d{2}$/.test(v.date))
+          throw new Error("Use a date in YYYY-MM-DD format.");
+        await done(() => save(v));
       },
-    ]);
+    });
   }
-
-  async function handleBlockSlot(status: 'open' | 'blocked') {
-    if (!canSlotsManage || !selectedFacilityId) return;
-    try {
-      await api.orgCreateSlots(currentOrgId, selectedFacilityId, {
-        court_number: selectedCourtNum,
-        date: slotDate,
-        slots: [blockSlotTime],
-        status,
-      });
-      const res = await api.orgListSlots(currentOrgId, selectedFacilityId, slotDate);
-      setCustomSlots(res?.slots || []);
-      Alert.alert('Slot updated', `Slot ${blockSlotTime} marked as ${status}.`);
-    } catch (e: any) {
-      Alert.alert('Slot update failed', e.message);
-    }
-  }
-
-  async function handleConfirmBooking(bid: string) {
-    if (!canBookingsConfirm) return;
-    try {
-      await api.orgConfirmBooking(currentOrgId, bid);
-      await reloadAll();
-      Alert.alert('Confirmed', 'Booking status set to Confirmed.');
-    } catch (e: any) {
-      Alert.alert('Failed', e.message);
-    }
-  }
-
-  async function handleCancelBooking(bid: string) {
-    if (!canBookingsCancel) return;
-    Alert.alert('Cancel booking?', 'This will free the slot for other players.', [
-      { text: 'Back', style: 'cancel' },
-      {
-        text: 'Cancel booking',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.orgCancelBooking(currentOrgId, bid);
-            await reloadAll();
-          } catch (e: any) {
-            Alert.alert('Error', e.message);
-          }
-        },
+  function confirm(title: string, action: () => Promise<any>) {
+    edit(
+      title,
+      [{ key: "confirm", label: "Type CONFIRM to continue", required: true }],
+      {},
+      async (v) => {
+        if (v.confirm !== "CONFIRM")
+          throw new Error("Type CONFIRM to continue.");
+        return action();
       },
-    ]);
-  }
-
-  async function handleAddEvent() {
-    if (!canEventsManage || !eventName.trim()) return;
-    setBusy(true);
-    try {
-      await api.orgCreateEvent(currentOrgId, {
-        name: eventName.trim(),
-        date: `${eventDate}T10:00:00Z`,
-        price: parseInt(eventPrice) || 0,
-        type: eventType,
-        sport: `sport-${selectedSport}`,
-        status: eventStatus,
-        facility_id: selectedFacilityId || undefined,
-      });
-      setShowAddEvent(false);
-      setEventName('');
-      await reloadAll();
-      Alert.alert('Event saved', `Event saved as ${eventStatus}.`);
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleToggleClubStatus(active: boolean) {
-    if (!canManageClub) return;
-    const nextStatus = active ? 'active' : 'inactive';
-    try {
-      await api.orgUpdateStatus(currentOrgId, nextStatus);
-      setOrg((prev: any) => ({ ...prev, status: nextStatus }));
-      Alert.alert('Status updated', `Club is now ${nextStatus}.`);
-    } catch (e: any) {
-      Alert.alert('Status update failed', e.message);
-    }
-  }
-
-  async function addStaff() {
-    if (!canStaff || !staffMobile.trim()) return;
-    setBusy(true);
-    try {
-      await api.orgAddStaff(currentOrgId, { mobile: staffMobile.trim(), role: staffRole });
-      setStaffMobile('');
-      await reloadAll();
-      Alert.alert('Staff added', `${roleLabel(staffRole as any)} assigned.`);
-    } catch (e: any) {
-      Alert.alert('Unable to add staff', e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function transferOwnership() {
-    if (!canTransfer || !transferMobile.trim()) return;
-    Alert.alert('Transfer ownership?', 'You will become a Club Admin after the transfer.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Transfer',
-        style: 'destructive',
-        onPress: async () => {
-          setBusy(true);
-          try {
-            await api.orgTransferOwnership(currentOrgId, { mobile: transferMobile.trim() });
-            setTransferMobile('');
-            Alert.alert('Ownership transferred', 'Role updated successfully.');
-            router.back();
-          } catch (e: any) {
-            Alert.alert('Transfer failed', e.message);
-          } finally {
-            setBusy(false);
-          }
-        },
-      },
-    ]);
-  }
-
-  if (capsLoading) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
-  if (err) {
-    return (
-      <SafeAreaView style={styles.wrap}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()}><Ionicons name="chevron-back" size={26} color={colors.onSurface} /></Pressable>
-          <Text style={styles.title}>Club</Text>
-          <View style={{ width: 26 }} />
-        </View>
-        <Text style={{ color: colors.error, padding: spacing.lg }}>{err}</Text>{canView && <Button label="Try again" onPress={reloadAll} />}
-      </SafeAreaView>
     );
   }
-  if (!org) return <View style={{ flex: 1, backgroundColor: colors.surface }}><Loader /></View>;
-
+  const action = (label: string, onPress: () => void) => (
+    <Button
+      label={label}
+      onPress={onPress}
+      variant="secondary"
+      fullWidth={false}
+    />
+  );
+  function eventEditor(kind: "events" | "tournaments", item?: any) {
+    const tournament = kind === "tournaments";
+    edit(
+      `${item ? "Edit" : "Create"} ${tournament ? "tournament" : "event"}`,
+      [
+        ...eventFields,
+        ...(tournament
+          ? [
+              { key: "format", label: "Format", required: true },
+              { key: "skill_level", label: "Skill level" },
+              {
+                key: "entry_fee",
+                label: "Entry fee (₹)",
+                numeric: true,
+                required: true,
+              },
+              { key: "prize_pool", label: "Prize pool (₹)", numeric: true },
+            ]
+          : [
+              { key: "type", label: "Event type" },
+              {
+                key: "price",
+                label: "Price (₹)",
+                numeric: true,
+                required: true,
+              },
+            ]),
+        {
+          key: "facility_id",
+          label: "Venue",
+          options: [
+            { value: "", label: "Club-wide" },
+            ...courts.map((f) => ({ value: f.id, label: f.name })),
+          ],
+        },
+      ],
+      item || {
+        date: today(),
+        sport: "sport-badminton",
+        status: "draft",
+        max_participants: 32,
+        entry_fee: 0,
+        prize_pool: 0,
+        price: 0,
+        format: "Doubles",
+      },
+      (v) =>
+        tournament
+          ? item
+            ? api.orgUpdateTournament(id, item.id, v)
+            : api.orgCreateTournament(id, v)
+          : item
+            ? api.orgUpdateEvent(id, item.id, v)
+            : api.orgCreateEvent(id, v),
+    );
+  }
+  if (authLoading) return <Loader />;
+  if (!permitted)
+    return (
+      <SafeAreaView style={{ flex: 1, padding: 24 }}>
+        <Text style={{ color: c.text, fontSize: 22 }}>
+          Club access required
+        </Text>
+        <Text style={{ color: c.textSecondary, marginVertical: 16 }}>
+          Your account does not have access to this club.
+        </Text>
+        <Button
+          label="Back to home"
+          onPress={() => router.replace("/(tabs)")}
+        />
+      </SafeAreaView>
+    );
   return (
-    <SafeAreaView style={styles.wrap} testID="club-workspace-screen">
-      {/* Top Header */}
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} testID="club-back">
-          <Ionicons name="chevron-back" size={26} color={colors.onSurface} />
-        </Pressable>
-        <Text style={styles.title} numberOfLines={1}>{org.name}</Text>
-        <View style={{ width: 26 }} />
-      </View>
-
-      <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}><Brand compact /><Text style={{ color: colors.onSurfaceSecondary, marginTop: 8 }}>Active club: {org.name} · Changes apply to this club only.</Text></View>
-      {/* Workspace Badge */}
-      <View style={styles.badgeRow}>
-        <View style={styles.workspaceBadge}>
-          <Ionicons name="business" size={14} color={colors.brandPrimary} />
-          <Text style={styles.workspaceText}>
-            {org.city || 'India'} · {roleLabel(role as any)}
-          </Text>
-        </View>
-        <View style={[styles.statusPill, org.status === 'inactive' && styles.statusInactive]}>
-          <Text style={[styles.statusText, org.status === 'inactive' && styles.statusTextInactive]}>
-            {org.status === 'inactive' ? 'INACTIVE' : 'ACTIVE'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Navigation Tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBar}>
-        <TabItem label="Overview" active={tab === 'overview'} onPress={() => setTab('overview')} />
-        <TabItem label={`Courts (${facilities.length})`} active={tab === 'courts'} onPress={() => setTab('courts')} />
-        {canSlotsManage && <TabItem label="Slots" active={tab === 'slots'} onPress={() => setTab('slots')} />}
-        <TabItem label={`Bookings (${bookings.length})`} active={tab === 'bookings'} onPress={() => setTab('bookings')} />
-        {canEventsManage && <TabItem label="Events" active={tab === 'events'} onPress={() => setTab('events')} />}
-        {canStaff && <TabItem label={`Team (${members.length})`} active={tab === 'team'} onPress={() => setTab('team')} />}
-        {canManageClub && <TabItem label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />}
-      </ScrollView>
-
-      {/* Content Area */}
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }} showsVerticalScrollIndicator={false}>
-
-        {/* 1. OVERVIEW TAB */}
-        {tab === 'overview' && (
-          <>
-            {canAnalytics && analytics && (
-              <View style={styles.grid}>
-                {canManageClub && <Metric label="Confirmed booking value" value={`₹${(analytics.revenue || 0).toLocaleString('en-IN')}`} icon="cash" />}
-                <Metric label="Bookings" value={analytics.bookings_count || 0} icon="calendar" />
-                <Metric label="Courts" value={facilities.length} icon="grid" />
-                <Metric label="Team" value={members.length} icon="people" />
-              </View>
-            )}
-            <Text style={styles.sectionH}>{canManageClub ? 'Club operations' : 'Today at the venue'}</Text>
-            {!canManageClub && <View style={styles.grid}><Metric label="Today’s bookings" value={bookings.filter(b => b.date === new Date().toLocaleDateString('en-CA')).length} icon="calendar" /><Metric label="Courts" value={facilities.length} icon="grid" /></View>}
-            <View style={styles.quickGrid}>
-              {canCourtsCreate && (
-                <Pressable onPress={() => setShowAddCourt(true)} style={styles.actionTile}>
-                  <Ionicons name="add-circle-outline" size={24} color={colors.brandPrimary} />
-                  <Text style={styles.actionTileText}>Add Court</Text>
-                </Pressable>
-              )}
-              {canSlotsManage && (
-                <Pressable onPress={() => setTab('slots')} style={styles.actionTile}>
-                  <Ionicons name="time-outline" size={24} color={colors.brandPrimary} />
-                  <Text style={styles.actionTileText}>Manage Slots</Text>
-                </Pressable>
-              )}
-              {canEventsManage && (
-                <Pressable onPress={() => setShowAddEvent(true)} style={styles.actionTile}>
-                  <Ionicons name="trophy-outline" size={24} color={colors.brandPrimary} />
-                  <Text style={styles.actionTileText}>New Event</Text>
-                </Pressable>
-              )}
-            </View>
-          </>
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#F5F7FA" }}>
+      <WorkspaceHeading
+        title={org?.name || "Club workspace"}
+        subtitle={`${roleLabel(roleForOrg(id) as any)} · ${org?.city || "India"} · ${org?.status || "Loading"}`}
+        back={() => router.back()}
+      />
+      <WorkspaceNav
+        items={nav}
+        active={tab}
+        onChange={(t) => {
+          setTab(t);
+          setQuery("");
+        }}
+      />
+      <ScrollView
+        style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={workspaceStyles.content}
+      >
+        <Text style={{ color: c.textSecondary }}>
+          Active club: {org?.name || id}. Changes apply only to this club.
+        </Text>
+        {capabilities.organizations?.length > 1 && (
+          <WorkspaceNav
+            items={capabilities.organizations.map((o: any) => ({
+              key: o.org_id,
+              label: o.org_name || o.name || o.org_id,
+            }))}
+            active={id}
+            onChange={(o) => router.replace(`/club/${o}`)}
+          />
         )}
-
-        {/* 2. COURTS TAB (Owner + Admin) */}
-        {tab === 'courts' && (
+        <ErrorBanner error={error} retry={load} />
+        {notice ? (
+          <Text accessibilityLiveRegion="polite" style={{ color: "#17603C" }}>
+            {notice}
+          </Text>
+        ) : null}
+        {loading ? <Loader /> : null}
+        {tab === "overview" && (
           <>
-            <View style={styles.sectionRow}>
-              <Text style={styles.sectionH}>All Courts ({facilities.length})</Text>
-              {canCourtsCreate && (
-                <Pressable onPress={() => setShowAddCourt(true)} style={styles.smallPrimary}>
-                  <Ionicons name="add" size={16} color={colors.onBrandPrimary} />
-                  <Text style={styles.smallPrimaryText}>Add Court</Text>
-                </Pressable>
-              )}
-            </View>
-            {facilities.length === 0 ? (
-              <Text style={styles.empty}>No courts added yet. Add your first court above.</Text>
-            ) : (
-              facilities.map((f) => (
-                <View key={f.id} style={styles.card}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardTitle}>{f.name}</Text>
-                    <Text style={styles.cardMeta}>{f.area} · {f.courts_count} court(s) · ₹{f.price_per_hour}/hr</Text>
-                  </View>
-                  {canCourtsDelete && (
-                    <Pressable onPress={() => handleDeleteCourt(f.id)} style={styles.deleteBtn}>
-                      <Ionicons name="trash-outline" size={18} color={colors.error} />
-                    </Pressable>
-                  )}
-                </View>
-              ))
-            )}
-          </>
-        )}
-
-        {/* 3. SLOTS TAB (Owner + Admin + Manager) */}
-        {tab === 'slots' && canSlotsManage && (
-          <>
-            <Text style={styles.sectionH}>Slot Availability Management</Text>
-            <Text style={styles.muted}>Block maintenance hours or open custom time slots per court.</Text>
-
-            {/* Select Facility */}
-            <Text style={styles.fieldLabel}>Select Facility/Court Hub</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: spacing.sm }}>
-              {facilities.map((f) => (
-                <Pressable
-                  key={f.id}
-                  onPress={() => setSelectedFacilityId(f.id)}
-                  style={[styles.chip, selectedFacilityId === f.id && styles.chipActive]}
+            <Text style={{ fontSize: 28, fontWeight: "900", color: c.text }}>
+              {financial ? "Your club. In play." : "Ready for today?"}
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              {[
+                [
+                  "Today’s bookings",
+                  bookings.filter((b) => b.date?.slice(0, 10) === today())
+                    .length,
+                ],
+                [
+                  "Awaiting check-in",
+                  bookings.filter(
+                    (b) =>
+                      b.date?.slice(0, 10) === today() &&
+                      b.status === "confirmed" &&
+                      !b.checked_in_at,
+                  ).length,
+                ],
+                ["Venues", courts.length],
+                ...(financial && data.analytics
+                  ? [
+                      [
+                        "Confirmed booking value",
+                        `₹${Number(data.analytics.revenue || 0).toLocaleString("en-IN")}`,
+                      ],
+                    ]
+                  : []),
+              ].map(([label, value]) => (
+                <Card
+                  key={String(label)}
+                  style={{ flexGrow: 1, flexBasis: 180 }}
                 >
-                  <Text style={[styles.chipText, selectedFacilityId === f.id && styles.chipTextActive]}>{f.name}</Text>
-                </Pressable>
+                  <Text style={{ color: c.textSecondary }}>{label}</Text>
+                  <Text
+                    style={{
+                      fontSize: 30,
+                      fontWeight: "900",
+                      color: c.text,
+                      marginTop: 10,
+                    }}
+                  >
+                    {value}
+                  </Text>
+                </Card>
               ))}
-            </ScrollView>
-
-            {/* Court Number & Date */}
-            <View style={styles.formRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>Court Number</Text>
-                <TextInput
-                  value={String(selectedCourtNum)}
-                  onChangeText={(v) => setSelectedCourtNum(parseInt(v) || 1)}
-                  keyboardType="numeric"
-                  style={styles.input}
-                />
-              </View>
-              <View style={{ flex: 2, marginLeft: spacing.sm }}>
-                <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
-                <TextInput value={slotDate} onChangeText={setSlotDate} style={styles.input} />
-              </View>
             </View>
-
-            {/* Time Slot input */}
-            <Text style={styles.fieldLabel}>Time Slot (e.g. 09:00-10:00)</Text>
-            <TextInput value={blockSlotTime} onChangeText={setBlockSlotTime} style={styles.input} />
-
-            <View style={styles.slotActionRow}>
-              <Pressable onPress={() => handleBlockSlot('blocked')} style={styles.blockBtn}>
-                <Ionicons name="lock-closed" size={16} color="#fff" />
-                <Text style={styles.blockBtnText}>Block Slot</Text>
-              </Pressable>
-              <Pressable onPress={() => handleBlockSlot('open')} style={styles.openBtn}>
-                <Ionicons name="lock-open" size={16} color="#fff" />
-                <Text style={styles.openBtnText}>Open Slot</Text>
-              </Pressable>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              {action("Today’s bookings", () => {
+                setDay(today());
+                setTab("bookings");
+              })}
+              {can("slots.manage") &&
+                action("Manage court schedule", () => setTab("slots"))}
+              {can("events.manage") &&
+                action("Create event", () => eventEditor("events"))}
+              {action("Report an issue", () => setTab("issues"))}
             </View>
-
-            {/* Existing overrides list */}
-            <Text style={[styles.sectionH, { marginTop: spacing.lg }]}>Overrides on {slotDate}</Text>
-            {customSlots.length === 0 ? (
-              <Text style={styles.empty}>All slots on default schedule.</Text>
-            ) : (
-              customSlots.map((s) => (
-                <View key={s.id || s.slot} style={styles.row}>
-                  <Text style={styles.rowTitle}>Court {s.court_number} · {s.slot}</Text>
-                  <View style={[styles.statusPill, s.status === 'blocked' && styles.statusInactive]}>
-                    <Text style={[styles.statusText, s.status === 'blocked' && styles.statusTextInactive]}>{s.status.toUpperCase()}</Text>
-                  </View>
-                </View>
-              ))
-            )}
-          </>
-        )}
-
-        {/* 4. BOOKINGS TAB (All roles) */}
-        {tab === 'bookings' && (
-          <>
-            <Text style={styles.sectionH}>Club Bookings ({bookings.length})</Text>
-            {bookings.length === 0 ? (
-              <Text style={styles.empty}>No bookings on record.</Text>
-            ) : (
-              bookings.map((b) => (
-                <View key={b.id} style={styles.bookingCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowTitle}>Court {b.court_number} · {b.slot}</Text>
-                    <Text style={styles.rowMeta}>{b.date} · ₹{b.price} · {b.user_name || b.user_id}</Text>
-                    <Text style={[styles.bookingStatus, b.status === 'confirmed' ? styles.statusConfirmed : styles.statusPending]}>
-                      Status: {b.status?.toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.bookingBtnRow}>
-                    {canBookingsConfirm && b.status !== 'confirmed' && b.status !== 'cancelled' && (
-                      <Pressable onPress={() => handleConfirmBooking(b.id)} style={styles.confirmSmallBtn}>
-                        <Text style={styles.confirmSmallText}>Confirm</Text>
-                      </Pressable>
-                    )}
-                    {canBookingsCancel && b.status !== 'cancelled' && (
-                      <Pressable onPress={() => handleCancelBooking(b.id)} style={styles.cancelSmallBtn}>
-                        <Text style={styles.cancelSmallText}>Cancel</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                </View>
-              ))
-            )}
-          </>
-        )}
-
-        {/* 5. EVENTS TAB (Owner + Admin + Manager) */}
-        {tab === 'events' && canEventsManage && (
-          <>
-            <View style={styles.sectionRow}>
-              <Text style={styles.sectionH}>Events & Tournaments</Text>
-              <Pressable onPress={() => setShowAddEvent(true)} style={styles.smallPrimary}>
-                <Ionicons name="add" size={16} color={colors.onBrandPrimary} />
-                <Text style={styles.smallPrimaryText}>New Event</Text>
-              </Pressable>
-            </View>
-            {events.length === 0 && tournaments.length === 0 ? (
-              <Text style={styles.empty}>No events created yet.</Text>
-            ) : (
-              <>
-                {events.map((e) => (
-                  <View key={e.id} style={styles.card}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardTitle}>{e.name}</Text>
-                      <Text style={styles.cardMeta}>{e.date?.slice(0, 10)} · ₹{e.price} · {e.type}</Text>
-                    </View>
-                    <View style={[styles.statusPill, e.status === 'draft' && styles.statusInactive]}>
-                      <Text style={[styles.statusText, e.status === 'draft' && styles.statusTextInactive]}>
-                        {e.status?.toUpperCase() || 'PUBLISHED'}
-                      </Text>
-                    </View>
-                  </View>
+            <Text style={{ fontSize: 20, fontWeight: "800", color: c.text }}>
+              Workspace tools
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              {nav
+                .filter((n) => n.key !== "overview")
+                .map((n) => (
+                  <Card key={n.key} style={{ flexBasis: 240, flexGrow: 1 }}>
+                    <Button
+                      label={n.label}
+                      variant="secondary"
+                      onPress={() => setTab(n.key)}
+                    />
+                  </Card>
                 ))}
-              </>
-            )}
+            </View>
           </>
         )}
-
-        {/* 6. TEAM TAB (Owner + Admin) */}
-        {tab === 'team' && canStaff && (
+        {tab === "bookings" && (
           <>
-            <Text style={styles.sectionH}>Team Members ({members.length})</Text>
-            {members.map((m) => (
-              <View key={m.id || m.user_id} style={styles.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rowTitle}>{m.user?.name || m.user?.mobile || 'Staff'}</Text>
-                  <Text style={styles.rowMeta}>{roleLabel(m.role)}</Text>
-                </View>
-              </View>
-            ))}
-
-            <View style={styles.manageCard}>
-              <Text style={styles.manageTitle}>Add Staff or Manager</Text>
-              <TextInput
-                placeholder="Mobile number (+91...)"
-                placeholderTextColor={colors.onSurfaceMuted}
-                value={staffMobile}
-                onChangeText={setStaffMobile}
-                keyboardType="phone-pad"
-                style={styles.input}
-              />
-              <View style={styles.roleToggle}>
-                <Pressable
-                  onPress={() => setStaffRole('CLUB_STAFF')}
-                  style={[styles.toggle, staffRole === 'CLUB_STAFF' && styles.toggleActive]}
-                >
-                  <Text style={[styles.toggleText, staffRole === 'CLUB_STAFF' && styles.toggleTextActive]}>Staff</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setStaffRole('CLUB_MANAGER')}
-                  style={[styles.toggle, staffRole === 'CLUB_MANAGER' && styles.toggleActive]}
-                >
-                  <Text style={[styles.toggleText, staffRole === 'CLUB_MANAGER' && styles.toggleTextActive]}>Manager</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setStaffRole('CLUB_ADMIN')}
-                  style={[styles.toggle, staffRole === 'CLUB_ADMIN' && styles.toggleActive]}
-                >
-                  <Text style={[styles.toggleText, staffRole === 'CLUB_ADMIN' && styles.toggleTextActive]}>Admin</Text>
-                </Pressable>
-              </View>
-              <Pressable disabled={busy || !staffMobile.trim()} onPress={addStaff} style={styles.primary}>
-                <Text style={styles.primaryText}>{busy ? 'Saving…' : 'Add Team Member'}</Text>
-              </Pressable>
+            <Text style={{ fontSize: 24, fontWeight: "800", color: c.text }}>
+              Bookings & check-in
+            </Text>
+            <TextInput
+              accessibilityLabel="Search bookings or customers"
+              placeholder="Search customer, booking or court"
+              value={query}
+              onChangeText={setQuery}
+              style={{
+                backgroundColor: "white",
+                padding: 16,
+                borderRadius: 14,
+                fontSize: 16,
+                color: c.text,
+              }}
+            />
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {action("Today", () => setDay(today()))}
+              {action("All dates", () => setDay(""))}
+              {can("reports.export") &&
+                action("Export bookings", () => {
+                  api
+                    .orgExportBookings(id)
+                    .then((r) =>
+                      exportBookings(r),
+                    )
+                    .catch(setError);
+                })}
             </View>
-
-            {canTransfer && (
-              <View style={[styles.manageCard, { marginTop: spacing.xl }]}>
-                <Text style={styles.manageTitle}>Transfer Club Ownership</Text>
-                <Text style={styles.muted}>This action transfers primary club ownership. You will remain an Admin.</Text>
-                <TextInput
-                  placeholder="New owner mobile number"
-                  placeholderTextColor={colors.onSurfaceMuted}
-                  value={transferMobile}
-                  onChangeText={setTransferMobile}
-                  keyboardType="phone-pad"
-                  style={styles.input}
-                />
-                <Pressable
-                  disabled={busy || !transferMobile.trim()}
-                  onPress={transferOwnership}
-                  style={styles.dangerButton}
-                >
-                  <Text style={styles.dangerText}>Transfer Ownership</Text>
-                </Pressable>
-              </View>
-            )}
+            <TextInput
+              accessibilityLabel="Filter booking date"
+              placeholder="Filter date: YYYY-MM-DD"
+              value={day}
+              onChangeText={setDay}
+              style={{
+                padding: 14,
+                backgroundColor: "white",
+                borderRadius: 12,
+                color: c.text,
+              }}
+            />
+            <DataRows
+              rows={filtered}
+              columns={[
+                {
+                  key: "user_name",
+                  label: "Customer",
+                  render: (b) => b.user_name || b.user_id,
+                },
+                {
+                  key: "slot",
+                  label: "Court / slot",
+                  render: (b) =>
+                    `${courts.find((f) => f.id === b.facility_id)?.name || "Venue"} · Court ${b.court_number} · ${b.slot}`,
+                },
+                { key: "date", label: "Date" },
+                {
+                  key: "status",
+                  label: "Status",
+                  render: (b) => (b.checked_in_at ? "Checked in" : b.status),
+                },
+              ]}
+              actions={(b) => (
+                <>
+                  {can("bookings.confirm") &&
+                    b.status === "confirmed" &&
+                    !b.checked_in_at &&
+                    action("Check in", () =>
+                      confirm("Check in this booking", () =>
+                        api.orgCheckIn(id, b.id),
+                      ),
+                    )}
+                  {can("bookings.confirm") &&
+                    !["confirmed", "cancelled", "pending_payment"].includes(
+                      b.status,
+                    ) &&
+                    action("Confirm", () =>
+                      confirm("Confirm booking", () =>
+                        api.orgConfirmBooking(id, b.id),
+                      ),
+                    )}
+                  {can("bookings.cancel") &&
+                    b.status !== "cancelled" &&
+                    action("Cancel", () =>
+                      confirm("Cancel booking (does not issue a refund)", () =>
+                        api.orgCancelBooking(id, b.id),
+                      ),
+                    )}
+                </>
+              )}
+            />
           </>
         )}
-
-        {/* 7. SETTINGS TAB (Owner + Admin) */}
-        {tab === 'settings' && canManageClub && (
+        {tab === "courts" && (
           <>
-            <Text style={styles.sectionH}>Club Settings</Text>
-            <View style={styles.settingRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.settingLabel}>Club Active Status</Text>
-                <Text style={styles.settingSub}>When inactive, all courts under this club are hidden from public booking.</Text>
-              </View>
-              <Switch
-                value={org.status !== 'inactive'}
-                onValueChange={handleToggleClubStatus}
-                trackColor={{ true: colors.brandPrimary, false: colors.border }}
+            {can("courts.create") &&
+              action("Add court", () =>
+                edit(
+                  "Add court",
+                  courtFields,
+                  {
+                    city: org?.city,
+                    sport: "sport-badminton",
+                    courts_count: 1,
+                    price_per_hour: 0,
+                  },
+                  (v) => {
+                    const { sport, ...rest } = v;
+                    return api.orgCreateFacility(id, {
+                      ...rest,
+                      sports: [sport],
+                    });
+                  },
+                ),
+              )}
+            <DataRows
+              rows={courts}
+              columns={[
+                { key: "name", label: "Venue" },
+                { key: "area", label: "Location" },
+                { key: "courts_count", label: "Courts" },
+                {
+                  key: "sports",
+                  label: "Sports",
+                  render: (f) =>
+                    (f.sports || []).join(", ").replace(/sport-/g, ""),
+                },
+              ]}
+              actions={(f) => (
+                <>
+                  {can("courts.edit") &&
+                    action("Edit", () =>
+                      edit(
+                        "Edit court",
+                        courtFields,
+                        { ...f, sport: f.sports?.[0] },
+                        (v) => {
+                          const { sport, ...rest } = v;
+                          return api.orgUpdateFacility(id, f.id, {
+                            ...rest,
+                            sports: [
+                              sport,
+                              ...(f.sports || []).filter(
+                                (s: string) =>
+                                  s !== f.sports?.[0] && s !== sport,
+                              ),
+                            ],
+                          });
+                        },
+                      ),
+                    )}
+                  {can("courts.delete") &&
+                    action("Delete", () =>
+                      confirm(`Delete ${f.name}`, () =>
+                        api.orgDeleteFacility(id, f.id),
+                      ),
+                    )}
+                </>
+              )}
+            />
+          </>
+        )}
+        {tab === "slots" && can("slots.manage") && (
+          <>
+            <Text style={{ fontSize: 24, fontWeight: "800", color: c.text }}>
+              Court availability
+            </Text>
+            <WorkspaceNav
+              items={courts.map((f) => ({ key: f.id, label: f.name }))}
+              active={facility}
+              onChange={setFacility}
+            />
+            {facility ? (
+              <SlotPanel
+                key={`${id}:${facility}`}
+                orgId={id}
+                facility={courts.find((f) => f.id === facility)}
+                edit={edit}
+                confirm={confirm}
               />
-            </View>
-
-            {/* Audit Log */}
-            <Text style={[styles.sectionH, { marginTop: spacing.xl }]}>Audit Trail ({auditLogs.length})</Text>
-            {auditLogs.length === 0 ? (
-              <Text style={styles.empty}>No audit log entries yet.</Text>
             ) : (
-              auditLogs.slice(0, 15).map((log) => (
-                <View key={log.id} style={styles.logRow}>
-                  <Text style={styles.logAction}>{log.action}</Text>
-                  <Text style={styles.logMeta}>{log.created_at?.slice(0, 19).replace('T', ' ')} · {log.actor?.name || log.actor_id}</Text>
-                </View>
-              ))
+              <Text style={{ color: c.textSecondary }}>
+                Select a venue to view, block or reopen slots.
+              </Text>
             )}
           </>
         )}
+        {(tab === "events" || tab === "tournaments") &&
+          can("events.manage") && (
+            <>
+              {action(
+                `Create ${tab === "events" ? "event" : "tournament"}`,
+                () => eventEditor(tab),
+              )}
+              <DataRows
+                rows={data[tab] || []}
+                columns={[
+                  { key: "name", label: "Name" },
+                  { key: "date", label: "Date" },
+                  { key: "sport", label: "Sport" },
+                  { key: "status", label: "Publish state" },
+                ]}
+                actions={(item) => (
+                  <>
+                    {action("Edit", () => eventEditor(tab, item))}
+                    {action("Delete", () =>
+                      confirm(`Delete ${item.name}`, () =>
+                        tab === "events"
+                          ? api.orgDeleteEvent(id, item.id)
+                          : api.orgDeleteTournament(id, item.id),
+                      ),
+                    )}
+                  </>
+                )}
+              />
+            </>
+          )}
+        {tab === "games" && can("games.manage") && (
+          <DataRows
+            rows={data.games || []}
+            columns={[
+              {
+                key: "name",
+                label: "Game",
+                render: (g) => g.title || g.name || "Open game",
+              },
+              { key: "date", label: "Date" },
+              { key: "sport", label: "Sport" },
+              { key: "status", label: "Status" },
+            ]}
+            actions={(g) =>
+              action("View game", () => router.push(`/game/${g.id}` as any))
+            }
+          />
+        )}
+        {tab === "team" && can("staff.manage") && (
+          <>
+            {action("Add team member", () =>
+              edit(
+                "Add team member",
+                [
+                  { key: "mobile", label: "Mobile (+91…)", required: true },
+                  roles,
+                ],
+                { role: "CLUB_STAFF" },
+                (v) => api.orgAddStaff(id, v),
+              ),
+            )}
+            <DataRows
+              rows={data.team || []}
+              columns={[
+                {
+                  key: "user",
+                  label: "Team member",
+                  render: (m) => m.user?.name || m.user?.mobile || m.user_id,
+                },
+                {
+                  key: "role",
+                  label: "Role",
+                  render: (m) => roleLabel(m.role),
+                },
+              ]}
+              actions={(m) =>
+                m.role !== "CLUB_OWNER" ? (
+                  <>
+                    {action("Change role", () =>
+                      edit("Change club role", [roles], m, (v) =>
+                        api.orgUpdateMemberRole(id, m.user_id, v.role),
+                      ),
+                    )}
+                    {action("Remove", () =>
+                      confirm("Remove club access", () =>
+                        api.orgRemoveMember(id, m.user_id),
+                      ),
+                    )}
+                  </>
+                ) : null
+              }
+            />
+          </>
+        )}
+        {tab === "issues" && (
+          <>
+            {action("Report venue issue", () =>
+              edit(
+                "Report venue issue",
+                [
+                  { key: "title", label: "Issue title", required: true },
+                  {
+                    key: "description",
+                    label: "What happened?",
+                    multiline: true,
+                    required: true,
+                  },
+                ],
+                {},
+                (v) => api.orgCreateIssue(id, v),
+              ),
+            )}
+            <DataRows
+              rows={data.issues || []}
+              columns={[
+                { key: "title", label: "Issue" },
+                { key: "description", label: "Details" },
+                { key: "status", label: "Status" },
+                { key: "created_at", label: "Reported" },
+              ]}
+              actions={(i) =>
+                i.status !== "resolved"
+                  ? action("Resolve", () =>
+                      confirm("Mark issue resolved", () =>
+                        api.orgResolveIssue(id, i.id),
+                      ),
+                    )
+                  : null
+              }
+            />
+          </>
+        )}
+        {tab === "settings" && financial && (
+          <>
+            <Text style={{ fontSize: 24, fontWeight: "800", color: c.text }}>
+              Club settings
+            </Text>
+            {action("Edit club details", () =>
+              edit(
+                "Club details",
+                [
+                  name,
+                  { key: "city", label: "City", required: true },
+                  {
+                    key: "description",
+                    label: "About the club",
+                    multiline: true,
+                  },
+                  { key: "address", label: "Address" },
+                  { key: "phone", label: "Phone" },
+                  { key: "email", label: "Email" },
+                  { key: "website", label: "Website" },
+                  { key: "logo", label: "Logo URL", image: true },
+                  { key: "cover_image", label: "Cover image URL", image: true },
+                ],
+                org,
+                (v) => api.orgUpdate(id, v),
+              ),
+            )}
+            {action("Set map location", () =>
+              edit(
+                "Map location",
+                [
+                  { key: "lat", label: "Latitude", required: true },
+                  { key: "lng", label: "Longitude", required: true },
+                  { key: "address", label: "Address" },
+                ],
+                org,
+                (v) => {
+                  const lat = Number(v.lat),
+                    lng = Number(v.lng);
+                  if (
+                    !Number.isFinite(lat) ||
+                    !Number.isFinite(lng) ||
+                    Math.abs(lat) > 90 ||
+                    Math.abs(lng) > 180
+                  )
+                    throw new Error("Enter valid latitude and longitude.");
+                  return api.orgUpdateLocation(id, { ...v, lat, lng });
+                },
+              ),
+            )}
+            {action(
+              org?.status === "inactive" ? "Activate club" : "Deactivate club",
+              () =>
+                confirm("Change club visibility", () =>
+                  api.orgUpdateStatus(
+                    id,
+                    org?.status === "inactive" ? "active" : "inactive",
+                  ),
+                ),
+            )}
+            {can("ownership.transfer") &&
+              action("Transfer ownership", () =>
+                edit(
+                  "Transfer ownership",
+                  [
+                    {
+                      key: "mobile",
+                      label: "New owner mobile",
+                      required: true,
+                    },
+                    {
+                      key: "confirm",
+                      label: "Type TRANSFER to confirm",
+                      required: true,
+                    },
+                  ],
+                  {},
+                  (v) => {
+                    if (v.confirm !== "TRANSFER")
+                      throw new Error("Type TRANSFER to confirm.");
+                    return api.orgTransferOwnership(id, { mobile: v.mobile });
+                  },
+                ),
+              )}
+          </>
+        )}
+        {tab === "audit" && financial && (
+          <DataRows
+            rows={data.audit?.entries || []}
+            columns={[
+              { key: "action", label: "Action" },
+              {
+                key: "actor",
+                label: "Changed by",
+                render: (l) => l.actor?.name || l.actor_id,
+              },
+              { key: "created_at", label: "Time" },
+            ]}
+          />
+        )}
+        <Button
+          label="Refresh workspace"
+          variant="secondary"
+          loading={loading}
+          onPress={load}
+        />
       </ScrollView>
-
-      {/* Add Court Modal */}
-      <Modal visible={showAddCourt} transparent animationType="slide">
-        <View style={styles.modalBg}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add New Court</Text><SportPicker value={selectedSport} onChange={setSelectedSport} />
-            <TextInput placeholder="Court Name (e.g. Center Court)" placeholderTextColor={colors.onSurfaceMuted} value={newCourtName} onChangeText={setNewCourtName} style={styles.input} />
-            <TextInput placeholder="Area/Location (e.g. Koramangala)" placeholderTextColor={colors.onSurfaceMuted} value={newCourtArea} onChangeText={setNewCourtArea} style={styles.input} />
-            <TextInput placeholder="Number of courts (e.g. 2)" placeholderTextColor={colors.onSurfaceMuted} value={newCourtCount} onChangeText={setNewCourtCount} keyboardType="numeric" style={styles.input} />
-            <TextInput placeholder="Price per hour ₹ (e.g. 600)" placeholderTextColor={colors.onSurfaceMuted} value={newCourtPrice} onChangeText={setNewCourtPrice} keyboardType="numeric" style={styles.input} />
-            <View style={styles.modalBtns}>
-              <Pressable onPress={() => setShowAddCourt(false)} style={styles.modalCancel}><Text style={styles.modalCancelText}>Cancel</Text></Pressable>
-              <Pressable onPress={handleAddCourt} style={styles.modalSubmit}><Text style={styles.modalSubmitText}>Create Court</Text></Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Add Event Modal */}
-      <Modal visible={showAddEvent} transparent animationType="slide">
-        <View style={styles.modalBg}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Create Event</Text><SportPicker value={selectedSport} onChange={setSelectedSport} />
-            <TextInput placeholder="Event Name" placeholderTextColor={colors.onSurfaceMuted} value={eventName} onChangeText={setEventName} style={styles.input} />
-            <TextInput placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.onSurfaceMuted} value={eventDate} onChangeText={setEventDate} style={styles.input} />
-            <TextInput placeholder="Price ₹" placeholderTextColor={colors.onSurfaceMuted} value={eventPrice} onChangeText={setEventPrice} keyboardType="numeric" style={styles.input} />
-            <View style={styles.roleToggle}>
-              <Pressable onPress={() => setEventStatus('draft')} style={[styles.toggle, eventStatus === 'draft' && styles.toggleActive]}><Text style={[styles.toggleText, eventStatus === 'draft' && styles.toggleTextActive]}>Draft</Text></Pressable>
-              <Pressable onPress={() => setEventStatus('published')} style={[styles.toggle, eventStatus === 'published' && styles.toggleActive]}><Text style={[styles.toggleText, eventStatus === 'published' && styles.toggleTextActive]}>Published</Text></Pressable>
-            </View>
-            <View style={styles.modalBtns}>
-              <Pressable onPress={() => setShowAddEvent(false)} style={styles.modalCancel}><Text style={styles.modalCancelText}>Cancel</Text></Pressable>
-              <Pressable onPress={handleAddEvent} style={styles.modalSubmit}><Text style={styles.modalSubmitText}>Save Event</Text></Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {editor && (
+        <WorkspaceEditor
+          key={`${id}:${editor.title}`}
+          {...editor}
+          context={org?.name || id}
+          close={() => setEditor(undefined)}
+        />
+      )}
     </SafeAreaView>
   );
 }
-
-function TabItem({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function SlotPanel({
+  orgId,
+  facility,
+  edit,
+  confirm,
+}: {
+  orgId: string;
+  facility: any;
+  edit: Function;
+  confirm: Function;
+}) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [error, setError] = useState<unknown>();
+  const [busy, setBusy] = useState(true);
+  async function load() {
+    setBusy(true);
+    setError(null);
+    try {
+      setRows((await api.orgListSlots(orgId, facility.id)).slots || []);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [orgId, facility.id]);
   return (
-    <Pressable onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive]}>
-      <Text style={[styles.tabBtnText, active && styles.tabBtnTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function Metric({ label, value, icon }: { label: string; value: any; icon: any }) {
-  return (
-    <View style={styles.metric}>
-      <Ionicons name={icon} size={18} color={colors.brandPrimary} />
-      <Text style={styles.metricVal}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
+    <View style={{ gap: 16 }}>
+      <ErrorBanner error={error} retry={load} />
+      <Button
+        label="Add availability override"
+        onPress={() =>
+          edit(
+            "Court availability",
+            [
+              {
+                key: "court_number",
+                label: "Court number",
+                numeric: true,
+                required: true,
+              },
+              { key: "date", label: "Date (YYYY-MM-DD, or * for daily recurring)", required: true },
+              {
+                key: "slots",
+                label: "Times, comma separated (09:00-10:00)",
+                required: true,
+              },
+              {
+                key: "status",
+                label: "Availability",
+                options: [
+                  { value: "open", label: "Open" },
+                  { value: "blocked", label: "Blocked" },
+                ],
+                required: true,
+              },
+            ],
+            { date: today(), court_number: 1, status: "blocked" },
+            async (v: any) => {
+              if (
+                !Number.isInteger(v.court_number) ||
+                v.court_number < 1 ||
+                v.court_number > facility.courts_count
+              )
+                throw new Error("Choose a valid court number.");
+              const slots = v.slots.split(",").map((s: string) => s.trim());
+              if (
+                slots.some(
+                  (s: string) =>
+                    !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(
+                      s,
+                    ),
+                )
+              )
+                throw new Error("Use HH:MM-HH:MM for each slot.");
+              await api.orgCreateSlots(orgId, facility.id, { ...v, slots });
+              await load();
+            },
+          )
+        }
+      />
+      {busy ? (
+        <Loader />
+      ) : (
+        <DataRows
+          rows={rows}
+          columns={[
+            { key: "court_number", label: "Court" },
+            { key: "date", label: "Date" },
+            {
+              key: "slot",
+              label: "Time",
+              render: (s) => s.slot || s.time || s.slots?.join(", "),
+            },
+            { key: "status", label: "Availability" },
+          ]}
+          actions={(r) => (
+            <>
+              <Button
+                label={r.status === "blocked" ? "Reopen" : "Block"}
+                fullWidth={false}
+                variant="secondary"
+                onPress={() =>
+                  confirm("Change slot availability", async () => {
+                    await api.orgUpdateSlot(
+                      orgId,
+                      facility.id,
+                      r.id,
+                      r.status === "blocked" ? "open" : "blocked",
+                    );
+                    await load();
+                  })
+                }
+              />
+              <Button
+                label="Reset"
+                fullWidth={false}
+                variant="secondary"
+                onPress={() =>
+                  confirm("Remove availability override", async () => {
+                    await api.orgDeleteSlot(orgId, facility.id, r.id);
+                    await load();
+                  })
+                }
+              />
+            </>
+          )}
+        />
+      )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: colors.surface },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
-  title: { flex: 1, color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800', textAlign: 'center', marginHorizontal: spacing.sm },
-  badgeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.lg, marginTop: spacing.sm },
-  workspaceBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.brandTertiary, borderWidth: 1, borderColor: colors.brandPrimary, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill },
-  workspaceText: { color: colors.brandPrimary, fontSize: font.sizes.xs, fontWeight: '700' },
-  statusPill: { backgroundColor: 'rgba(52, 199, 89, 0.15)', borderWidth: 1, borderColor: '#34C759', paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill },
-  statusInactive: { backgroundColor: 'rgba(255, 69, 58, 0.15)', borderColor: colors.error },
-  statusText: { color: '#34C759', fontSize: font.sizes.xs, fontWeight: '800' },
-  statusTextInactive: { color: colors.error },
-  tabBar: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, gap: spacing.xs },
-  tabBtn: { paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
-  tabBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  tabBtnText: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, fontWeight: '700' },
-  tabBtnTextActive: { color: colors.onBrandPrimary },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  metric: { width: '45%', flexGrow: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, gap: 4 },
-  metricVal: { color: colors.onSurface, fontSize: font.sizes.xl, fontWeight: '900' },
-  metricLabel: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, textTransform: 'uppercase' },
-  quickGrid: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
-  actionTile: { flex: 1, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', gap: 6 },
-  actionTileText: { color: colors.onSurface, fontSize: font.sizes.xs, fontWeight: '700' },
-  sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.lg, marginBottom: spacing.md },
-  sectionH: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800' },
-  empty: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, paddingVertical: spacing.md },
-  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm },
-  cardTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '700' },
-  cardMeta: { color: colors.onSurfaceMuted, fontSize: font.sizes.sm, marginTop: 2 },
-  deleteBtn: { padding: spacing.sm },
-  smallPrimary: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill },
-  smallPrimaryText: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: '800' },
-  fieldLabel: { color: colors.onSurface, fontSize: font.sizes.xs, fontWeight: '700', marginTop: spacing.sm },
-  chip: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, marginRight: spacing.xs, backgroundColor: colors.surfaceSecondary },
-  chipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  chipText: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, fontWeight: '700' },
-  chipTextActive: { color: colors.onBrandPrimary },
-  formRow: { flexDirection: 'row', alignItems: 'center' },
-  input: { backgroundColor: colors.surfaceTertiary, borderWidth: 1, borderColor: colors.border, color: colors.onSurface, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, marginTop: spacing.xs, marginBottom: spacing.xs },
-  slotActionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
-  blockBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.error, borderRadius: radius.pill, paddingVertical: 11 },
-  blockBtnText: { color: '#fff', fontWeight: '800', fontSize: font.sizes.xs },
-  openBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#34C759', borderRadius: radius.pill, paddingVertical: 11 },
-  openBtnText: { color: '#fff', fontWeight: '800', fontSize: font.sizes.xs },
-  bookingCard: { backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm },
-  bookingStatus: { fontSize: font.sizes.xs, fontWeight: '800', marginTop: 4 },
-  statusConfirmed: { color: '#34C759' },
-  statusPending: { color: '#FF9500' },
-  bookingBtnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
-  confirmSmallBtn: { backgroundColor: '#34C759', paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill },
-  confirmSmallText: { color: '#fff', fontSize: font.sizes.xs, fontWeight: '800' },
-  cancelSmallBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.error, paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill },
-  cancelSmallText: { color: colors.error, fontSize: font.sizes.xs, fontWeight: '800' },
-  manageCard: { marginTop: spacing.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary },
-  manageTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: '800', marginBottom: spacing.xs },
-  muted: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, lineHeight: 18 },
-  roleToggle: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.sm },
-  toggle: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border },
-  toggleActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  toggleText: { color: colors.onSurfaceMuted, fontWeight: '700', fontSize: font.sizes.xs },
-  toggleTextActive: { color: colors.onBrandPrimary },
-  primary: { backgroundColor: colors.brandPrimary, borderRadius: radius.pill, paddingVertical: 12, alignItems: 'center', marginTop: spacing.md },
-  primaryText: { color: colors.onBrandPrimary, fontWeight: '800', fontSize: font.sizes.sm },
-  dangerButton: { backgroundColor: colors.surface, borderRadius: radius.pill, paddingVertical: 12, alignItems: 'center', marginTop: spacing.md, borderWidth: 1, borderColor: colors.error },
-  dangerText: { color: colors.error, fontWeight: '800', fontSize: font.sizes.sm },
-  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm },
-  rowTitle: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: '700' },
-  rowMeta: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, marginTop: 2 },
-  settingRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceSecondary, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
-  settingLabel: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: '700' },
-  settingSub: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, marginTop: 2 },
-  logRow: { paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  logAction: { color: colors.onSurface, fontSize: font.sizes.xs, fontWeight: '700' },
-  logMeta: { color: colors.onSurfaceMuted, fontSize: font.sizes.xs, marginTop: 2 },
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: spacing.lg },
-  modalContent: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.border },
-  modalTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: '800', marginBottom: spacing.md },
-  modalBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
-  modalCancel: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border },
-  modalCancelText: { color: colors.onSurfaceMuted, fontWeight: '700' },
-  modalSubmit: { flex: 1, backgroundColor: colors.brandPrimary, paddingVertical: 12, alignItems: 'center', borderRadius: radius.pill },
-  modalSubmitText: { color: colors.onBrandPrimary, fontWeight: '800' },
-});
-
-
+async function exportBookings(report: any) {
+  const content=JSON.stringify(report,null,2);
+  if(Platform.OS!=='web')return Share.share({message:content});
+  const url=URL.createObjectURL(new Blob([content],{type:'application/json'}));
+  const link=document.createElement('a');link.href=url;link.download='matchdrome-bookings.json';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}

@@ -1,11 +1,12 @@
 // Pure contract checks. Run after npm install: node tests/reliability.cjs
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const ts = require('typescript');
 const vm = require('node:vm');
-function moduleAt(file, imports = {}) {
+function moduleAt(file, imports = {}, globals = {}) {
   const exports = {};
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports, require: name => imports[name], console });
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports, require: name => imports[name], console, ...globals });
   return exports;
 }
 (async () => {
@@ -54,5 +55,36 @@ function moduleAt(file, imports = {}) {
   await payments.openCheckout({ payment: { id: 'p' }, checkout_url: '/api/payments/checkout/p?token=test' });
   assert.equal(opened.length, 1);
   await assert.rejects(payments.openCheckout({ payment: { id: 'p' }, checkout_url: 'https://example.org' }));
-  console.log('PASS: auth continuation/cancel, next URL validation, error sanitization, missing data, sports, role isolation and verified payment contracts');
+  const platform = { OS: 'web' };
+  const transfers = [];
+  class XHR {
+    constructor() { this.upload = {}; this.status = 200; this.responseText = '{"id":"uploaded-video"}'; this.headers = {}; }
+    open(method, url) { this.method = method; this.url = url; }
+    setRequestHeader(key, value) { this.headers[key] = value; }
+    send(form) { transfers.push({ form, headers: this.headers, method: this.method, url: this.url }); this.upload.onprogress({ lengthComputable: true, loaded: 50, total: 100 }); this.onload(); }
+  }
+  class NativeFile {
+    constructor(uri) { this.uri = uri; }
+    async upload(url, options) { transfers.push({ native: true, url, options }); options.onProgress({ bytesSent: 100, totalBytes: 100 }); return { status: 200, body: '{"id":"native-video"}' }; }
+  }
+  const apiModule = moduleAt('src/api.ts', {
+    './session-events': { notifySession() {} }, './errors': errors,
+    'expo-constants': { default: {} }, 'expo-file-system': { File: NativeFile, UploadType: { MULTIPART: 'multipart' } },
+    'react-native': { Platform: platform },
+    '@/src/utils/storage': { storage: { secureGet: async () => 'test-token', secureSet: async () => true, secureRemove: async () => true } },
+  }, { process: { env: { EXPO_PUBLIC_BACKEND_URL: 'https://api.example.test' } }, fetch: async () => ({ ok: true, blob: async () => new Blob(['video']) }), XMLHttpRequest: XHR, FormData, AbortController, setTimeout, clearTimeout });
+  let progress = 0;
+  const webUpload = await apiModule.api.aiCoach.uploadVideo('blob:fixture', 'match-a', 'game.mp4', 'video/mp4', value => { progress = value; });
+  assert.equal(webUpload.id, 'uploaded-video');
+  assert.equal(progress, 50);
+  assert.equal(transfers[0].form.get('match_id'), 'match-a');
+  assert.equal(transfers[0].form.get('file').name, 'game.mp4');
+  assert.equal(transfers[0].headers.Authorization, 'Bearer test-token');
+  assert.equal(transfers[0].headers['Content-Type'], undefined, 'Browser must supply multipart boundary');
+  platform.OS = 'ios';
+  const nativeUpload = await apiModule.api.aiCoach.uploadVideo('file:///game.mp4', 'match-b', 'game.mp4', 'video/mp4', value => { progress = value; });
+  assert.equal(nativeUpload.id, 'native-video');
+  assert.equal(progress, 100);
+  assert.equal(transfers[1].options.parameters.match_id, 'match-b');
+  console.log('PASS: auth continuation/cancel, next URL validation, errors, missing data, sports, role isolation, verified payments, browser/native multipart fields and upload progress');
 })().catch(error => { console.error(error); process.exit(1); });

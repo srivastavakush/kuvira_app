@@ -65,6 +65,7 @@ class OwnershipTransfer(BaseModel):
     name: Optional[str] = None
 
 class ClubUpdate(BaseModel):
+    city: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
     logo: Optional[str] = None
@@ -688,6 +689,8 @@ async def org_confirm_booking(
         raise KuviraError(404, "BOOKING_NOT_FOUND", "Booking not found in this club")
     if booking.get("status") == "cancelled":
         raise KuviraError(409, "BOOKING_CANCELLED", "Cannot confirm a cancelled booking")
+    if booking.get("status") == "pending_payment":
+        raise KuviraError(409, "PAYMENT_PENDING", "Payment must be verified before confirmation")
     await db.bookings.update_one(
         {"id": booking_id},
         {"$set": {
@@ -769,6 +772,8 @@ async def add_staff(
     existing = await db.organization_memberships.find_one(
         {"user_id": staff_user["id"], "org_id": org_id}
     )
+    if existing and existing.get("role") == ROLE_CLUB_OWNER:
+        raise KuviraError(409, "OWNER_ROLE_PROTECTED", "Club ownership must be transferred explicitly")
     if existing:
         await db.organization_memberships.update_one(
             {"user_id": staff_user["id"], "org_id": org_id},
@@ -781,6 +786,7 @@ async def add_staff(
             "created_by": user["id"], "created_at": utcnow().isoformat(),
         })
     log.info("Staff added user=%s role=%s org=%s by=%s", staff_user["id"], body.role, org_id, user["id"])
+    await _write_audit_log(org_id, "team.member.added", user["id"], {"user_id": staff_user["id"], "role": body.role})
     return {"added": True, "user_id": staff_user["id"], "role": body.role}
 
 
@@ -805,6 +811,7 @@ async def update_member_role(
         {"user_id": member_user_id, "org_id": org_id, "status": "active"},
         {"$set": {"role": body.role, "updated_at": utcnow().isoformat()}}
     )
+    await _write_audit_log(org_id, "team.role.updated", user["id"], {"user_id": member_user_id, "role": body.role})
     return {"updated": True, "user_id": member_user_id, "role": body.role}
 
 
@@ -987,7 +994,9 @@ async def org_create_event(
     city = org.get("city", "")
     state = org.get("state", "")
     if body.facility_id:
-        fac = await db.facilities.find_one({"id": body.facility_id}, {"_id": 0})
+        fac = await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}, {"_id": 0})
+        if not fac:
+            raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
         if fac:
             city = fac.get("city", city)
             state = fac.get("state", state)
@@ -1018,6 +1027,8 @@ async def org_update_event(
         raise KuviraError(404, "EVENT_NOT_FOUND", "Event not found in this club")
     if body.status and body.status not in ("draft", "published", "cancelled"):
         raise KuviraError(400, "INVALID_STATUS", "Status must be draft, published, or cancelled")
+    if body.facility_id and not await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}):
+        raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     updates["updated_at"] = utcnow().isoformat()
     await db.events.update_one({"id": event_id}, {"$set": updates})
@@ -1066,7 +1077,9 @@ async def org_create_tournament(
     city = org.get("city", "")
     state = org.get("state", "")
     if body.facility_id:
-        fac = await db.facilities.find_one({"id": body.facility_id}, {"_id": 0})
+        fac = await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}, {"_id": 0})
+        if not fac:
+            raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
         if fac:
             city = fac.get("city", city)
             state = fac.get("state", state)
@@ -1098,6 +1111,8 @@ async def org_update_tournament(
         raise KuviraError(404, "TOURNAMENT_NOT_FOUND", "Tournament not found in this club")
     if body.status and body.status not in ("draft", "published", "cancelled"):
         raise KuviraError(400, "INVALID_STATUS", "Status must be draft, published, or cancelled")
+    if body.facility_id and not await db.facilities.find_one({"id": body.facility_id, "org_id": org_id}):
+        raise KuviraError(404, "FACILITY_NOT_FOUND", "Venue not found in this club")
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     updates["updated_at"] = utcnow().isoformat()
     await db.tournaments.update_one({"id": tournament_id}, {"$set": updates})
@@ -1173,3 +1188,50 @@ async def admin_system_health(admin=Depends(require_platform_admin())):
         pass
     heartbeat = await db.ai_coach_jobs.find_one({"heartbeat_at": {"$exists": True}}, {"_id": 0, "heartbeat_at": 1, "status": 1}, sort=[("heartbeat_at", -1)]) if database == "connected" else None
     return {"api": "responding", "database": database, "worker_last_observation": heartbeat, "worker_status": "not monitored", "knowledge_refresh": "not monitored"}
+
+class VenueIssueCreate(BaseModel):
+    title: str
+    description: str
+
+@router.get('/orgs/{org_id}/issues')
+async def org_issues(org_id: str, user=Depends(require_org_permission('club.view'))):
+    return await db.venue_issues.find({'org_id': org_id}, {'_id': 0}).sort('created_at', -1).to_list(200)
+
+@router.post('/orgs/{org_id}/issues')
+async def org_create_issue(org_id: str, body: VenueIssueCreate, user=Depends(require_org_permission('club.view'))):
+    if not body.title.strip() or not body.description.strip():
+        raise KuviraError(400, 'DETAILS_REQUIRED', 'Add a title and description')
+    issue = {'id': gen_id(), 'org_id': org_id, 'title': body.title.strip()[:150], 'description': body.description.strip()[:4000], 'status': 'open', 'created_at': utcnow().isoformat(), 'created_by': user['id']}
+    await db.venue_issues.insert_one(dict(issue))
+    await _write_audit_log(org_id, 'issue.created', user['id'], {'issue_id': issue['id']})
+    return issue
+
+@router.post('/orgs/{org_id}/issues/{issue_id}/resolve')
+async def org_resolve_issue(org_id: str, issue_id: str, user=Depends(require_org_permission('club.view'))):
+    result = await db.venue_issues.update_one({'id': issue_id, 'org_id': org_id}, {'$set': {'status': 'resolved', 'resolved_by': user['id'], 'resolved_at': utcnow().isoformat()}})
+    if not result.matched_count:
+        raise KuviraError(404, 'ISSUE_NOT_FOUND', 'Issue not found in this club')
+    await _write_audit_log(org_id, 'issue.resolved', user['id'], {'issue_id': issue_id})
+    return {'resolved': True}
+
+@router.post('/orgs/{org_id}/bookings/{booking_id}/check-in')
+async def org_check_in(org_id: str, booking_id: str, user=Depends(require_org_permission('club.bookings.confirm'))):
+    fids = await _org_facility_ids(org_id)
+    booking = await db.bookings.find_one({'id': booking_id, 'facility_id': {'$in': fids}}, {'_id': 0})
+    if not booking:
+        raise KuviraError(404, 'BOOKING_NOT_FOUND', 'Booking not found in this club')
+    if booking.get('status') != 'confirmed':
+        raise KuviraError(409, 'BOOKING_NOT_CONFIRMED', 'Only confirmed bookings can be checked in')
+    if not booking.get('checked_in_at'):
+        result = await db.bookings.update_one({'id': booking_id, 'status': 'confirmed', 'checked_in_at': {'$exists': False}}, {'$set': {'checked_in_at': utcnow().isoformat(), 'checked_in_by': user['id']}})
+        if result.modified_count:
+            await _write_audit_log(org_id, 'booking.checked_in', user['id'], {'booking_id': booking_id})
+    return {'checked_in': True, 'booking_id': booking_id}
+
+@router.get('/admin/issues')
+async def admin_issues(admin=Depends(require_platform_admin())):
+    return await db.venue_issues.find({}, {'_id': 0}).sort('created_at', -1).to_list(200)
+
+@router.get('/admin/audit-log')
+async def admin_audit(admin=Depends(require_platform_admin())):
+    return await db.audit_logs.find({}, {'_id': 0}).sort('created_at', -1).to_list(300)

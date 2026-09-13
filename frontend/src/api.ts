@@ -47,13 +47,13 @@ async function request<T=any>(path:string,opts:RequestInit={}):Promise<T>{
   const token=await getToken();
   const headers:Record<string,string>={'Content-Type':'application/json',...(opts.headers as Record<string,string>|undefined)};
   if(token)headers.Authorization=`Bearer ${token}`;
-  let res: Response;
+  let res: Response; let text: string;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
-  try { res=await fetch(`${BASE}/api${path}`,{...opts,headers,signal:opts.signal || controller.signal}); }
+  try { res=await fetch(`${BASE}/api${path}`,{...opts,headers,signal:opts.signal || controller.signal}); text=await res.text(); }
   catch { throw new ApiConnectionError(); }
   finally { clearTimeout(timeout); }
-  const text=await res.text();let data:any=null;try{data=text?JSON.parse(text):null}catch{data=text}
+  let data:any=null;try{data=text?JSON.parse(text):null}catch{data=text}
   if(!res.ok)throw new ApiError(res.status, friendlyError(data?.error?.message||data?.detail||`HTTP ${res.status}`));return data as T;
 }
 
@@ -62,15 +62,37 @@ async function request<T=any>(path:string,opts:RequestInit={}):Promise<T>{
  * parts. Use Expo FileSystem's native multipart uploader instead of the old
  * React Native `{ uri, name, type }` pseudo-file object.
  */
-async function uploadMultipart<T=any>(path:string,fileUri:string,_fileName:string,mimeType:string,parameters:Record<string,string>={}):Promise<T>{
+async function uploadMultipart<T=any>(path:string,fileUri:string,_fileName:string,mimeType:string,parameters:Record<string,string>={},onProgress?:(percent:number)=>void):Promise<T>{
   const token=await getToken();
   let result:{status:number;body:string};
   try{
-    const file=new ExpoFile(fileUri);
-    result=await file.upload(`${BASE}/api${path}`,{
-      httpMethod:'POST', uploadType:UploadType.MULTIPART, fieldName:'file', mimeType,
-      parameters, sessionType:'foreground', headers:token?{Authorization:`Bearer ${token}`}:{},
-    });
+    if (Platform.OS === 'web') {
+      const selected = await fetch(fileUri);
+      if (!selected.ok) throw new Error('Could not read the selected file. Please choose it again.');
+      const blob = await selected.blob();
+      const form = new FormData();
+      form.append('file', blob, _fileName);
+      Object.entries(parameters).forEach(([key,value]) => form.append(key,value));
+      result = await new Promise<{ status:number; body:string }>((resolve,reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${BASE}/api${path}`);
+        xhr.timeout = 600000;
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.upload.onprogress = event => { if (event.lengthComputable && event.total > 0) onProgress?.(Math.min(100, Math.round(event.loaded / event.total * 100))); };
+        xhr.onerror = () => reject(new ApiConnectionError());
+        xhr.ontimeout = () => reject(new ApiConnectionError());
+        xhr.onabort = () => reject(new Error('Upload cancelled. Your selected file is ready to retry.'));
+        xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText });
+        xhr.send(form);
+      });
+    } else {
+      const file=new ExpoFile(fileUri);
+      result=await file.upload(`${BASE}/api${path}`,{
+        httpMethod:'POST', uploadType:UploadType.MULTIPART, fieldName:'file', mimeType,
+        parameters, sessionType:'foreground', headers:token?{Authorization:`Bearer ${token}`}:{},
+        onProgress: ({ bytesSent, totalBytes }) => { if (totalBytes > 0) onProgress?.(Math.min(100, Math.round(bytesSent / totalBytes * 100))); },
+      });
+    }
   }catch(error:any){
     const message=String(error?.message||'');
     if(/network|connection|timed out|failed to fetch/i.test(message))throw new ApiConnectionError();
@@ -87,7 +109,7 @@ export const api={
   facilitiesNearby:(lat:number,lng:number,radiusKm=25,sport?:string)=>request(`/facilities/nearby?lat=${lat}&lng=${lng}&radius_km=${radiusKm}${sport?'&sport='+sport:''}`),
   cities:()=>request('/cities'),
   updateMyLocation:(lat:number,lng:number,city?:string,state?:string,area?:string)=>request('/users/me/location',{method:'POST',body:JSON.stringify({lat,lng,city,state,area})}),
-  uploadMyAvatar:(fileUri:string,fileName='profile.jpg',mimeType='image/jpeg')=>uploadMultipart('/users/me/avatar',fileUri,fileName,mimeType),
+  uploadMyAvatar:(fileUri:string,fileName='profile.jpg',mimeType='image/jpeg',onProgress?:(percent:number)=>void)=>uploadMultipart('/users/me/avatar',fileUri,fileName,mimeType,{},onProgress),
   createBooking:(p:any)=>request('/bookings',{method:'POST',body:JSON.stringify(p)}),myBookings:()=>request('/bookings/mine'),games:(p:any={})=>request(`/games${Object.keys(p).length?'?'+new URLSearchParams(p).toString():''}`),game:(id:string)=>request(`/games/${id}`),createGame:(p:any)=>request('/games',{method:'POST',body:JSON.stringify(p)}),joinGame:(id:string)=>request(`/games/${id}/join`,{method:'POST'}),
   paymentStatus:(id:string)=>request(`/payments/${id}`),
   players:()=>request('/players'),player:(id:string)=>request(`/players/${id}`),posts:()=>request('/posts'),createPost:(p:any)=>request('/posts',{method:'POST',body:JSON.stringify(p)}),likePost:(id:string)=>request(`/posts/${id}/like`,{method:'POST'}),
@@ -101,7 +123,7 @@ export const api={
   aiChat:(text:string,session_id?:string)=>request('/ai/coach/chat',{method:'POST',body:JSON.stringify({text,session_id})}),aiHistory:(session_id?:string)=>request(`/ai/coach/history${session_id?'?session_id='+session_id:''}`),aiInsights:()=>request('/ai/insights'),aiRecommendations:()=>request('/ai/recommendations'),
   aiCoach:{
     createMatch:(p:any)=>request('/ai-coach/matches',{method:'POST',body:JSON.stringify(p)}),listMatches:()=>request('/ai-coach/matches'),
-    uploadVideo:(fileUri:string,matchId?:string,fileName='match.mp4',mimeType='video/mp4')=>uploadMultipart('/ai-coach/videos',fileUri,fileName,mimeType,matchId?{match_id:matchId}:{}),
+    uploadVideo:(fileUri:string,matchId?:string,fileName='match.mp4',mimeType='video/mp4',onProgress?:(percent:number)=>void)=>uploadMultipart('/ai-coach/videos',fileUri,fileName,mimeType,matchId?{match_id:matchId}:{},onProgress),
     startAnalysis:(match_id:string,video_id:string)=>request('/ai-coach/analyze',{method:'POST',body:JSON.stringify({match_id,video_id})}),analysisStatus:(job_id:string)=>request(`/ai-coach/analysis/${job_id}`),matchReport:(match_id:string,refresh=false)=>request(`/ai-coach/match/${match_id}/report${refresh?'?refresh=true':''}`),playerPerformance:()=>request('/ai-coach/player-performance'),
     chat:(text:string,opts:{session_id?:string;match_id?:string}={})=>request('/ai-coach/chat',{method:'POST',body:JSON.stringify({text,...opts})}),history:(session_id?:string)=>request(`/ai-coach/history${session_id?'?session_id='+session_id:''}`),seedKnowledge:()=>request('/ai-coach/knowledge/seed',{method:'POST'}),
     coachingState:()=>request('/ai-coach/coaching-state'),createGoal:(title:string,target?:string,due_at?:string)=>request('/ai-coach/goals',{method:'POST',body:JSON.stringify({title,target,due_at})}),updateGoal:(id:string,status:string)=>request(`/ai-coach/goals/${id}`,{method:'PATCH',body:JSON.stringify({status})}),training:()=>request('/ai-coach/training'),trainingOutcome:(id:string,status:string,outcome?:any)=>request(`/ai-coach/training/${id}/outcome`,{method:'POST',body:JSON.stringify({status,outcome})}),
@@ -115,6 +137,14 @@ export const api={
   // Org workspace — club management
   org:(id:string)=>request(`/orgs/${id}`),
   orgUpdate:(id:string,p:any)=>request(`/orgs/${id}`,{method:'PATCH',body:JSON.stringify(p)}),
+  orgGames:(id:string)=>request(`/orgs/${id}/games`),
+  orgIssues:(id:string)=>request(`/orgs/${id}/issues`),
+  orgCreateIssue:(id:string,p:any)=>request(`/orgs/${id}/issues`,{method:'POST',body:JSON.stringify(p)}),
+  orgResolveIssue:(id:string,issueId:string)=>request(`/orgs/${id}/issues/${issueId}/resolve`,{method:'POST'}),
+  orgCheckIn:(id:string,bookingId:string)=>request(`/orgs/${id}/bookings/${bookingId}/check-in`,{method:'POST'}),
+  adminGrantRole:(id:string)=>request(`/admin/users/${id}/platform-admin`,{method:'POST'}),
+  adminIssues:()=>request('/admin/issues'),
+  adminAudit:()=>request('/admin/audit-log'),
   orgAnalytics:(id:string)=>request(`/orgs/${id}/analytics`),
   orgBookings:(id:string)=>request(`/orgs/${id}/bookings`),
   orgConfirmBooking:(orgId:string,bookingId:string)=>request(`/orgs/${orgId}/bookings/${bookingId}/confirm`,{method:'POST'}),
