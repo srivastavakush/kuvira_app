@@ -251,6 +251,7 @@ export default function AdminDashboard() {
           { key: "issues", label: "Venue issues" },
           { key: "system", label: "System health" },
           { key: "audit", label: "Audit history" },
+          { key: "support", label: "Support tickets" }, { key: "moderation", label: "Community reports" },
         ]}
       />
       <ScrollView

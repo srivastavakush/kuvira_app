@@ -1,7 +1,7 @@
 import { SportPicker } from '@/src/components/sport-picker';
 import { useSession } from '@/src/session';
 import { requireAuth } from '@/src/auth-gate';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,6 +17,8 @@ const LEVELS = ['Beginner', 'Intermediate', 'Advanced', 'Pro'];
 export default function Upload() {
   const router = useRouter();
   const { user } = useSession();
+  const [maxBytes,setMaxBytes]=useState(500*1024*1024);
+  useEffect(()=>{if(user)api.aiCoach.uploadConfig().then(v=>setMaxBytes(v.max_bytes)).catch(()=>{});},[user?.id]);
   const [sport, setSport] = useState('badminton');
   const [goal, setGoal] = useState('');
   const [matchId, setMatchId] = useState('');
@@ -63,7 +65,7 @@ export default function Upload() {
     if (uploading) return;
     if (!authenticated && !requireAuth(user, router, undefined, () => submit(true))) return;
     if (!goal.trim()) { Alert.alert('Choose a goal', 'Tell your coach what you want to improve.'); return; }
-    if (asset?.fileSize && asset.fileSize > 500 * 1024 * 1024) { Alert.alert('Video too large', 'Choose a video under 500 MB.'); return; }
+    if (asset?.fileSize && asset.fileSize > maxBytes) { Alert.alert('Video too large', `Choose a video under ${Math.floor(maxBytes/1024/1024)} MB.`); return; }
     if (!asset) { Alert.alert('Select a video', 'Pick a match video from your library first.'); return; }
     setUploading(true);
     try {
@@ -97,7 +99,7 @@ export default function Upload() {
     <SafeAreaView style={styles.wrap} edges={['top']} testID="ai-coach-upload">
       <ScreenHeader title="Analyze a match" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
-        <View pointerEvents={uploading || !!matchId ? "none" : "auto"}><SportPicker value={sport} onChange={setSport} /><Text style={styles.fieldLabel}>Your level</Text><View style={styles.chipRow}>{LEVELS.map(lv => <Pressable key={lv} onPress={() => setLevel(lv)} style={[styles.chip, level === lv && styles.chipActive]}><Text style={[styles.chipText, level === lv && styles.chipTextActive]}>{lv}</Text></Pressable>)}</View><InputField label="Your goal" value={goal} onChangeText={setGoal} placeholder="e.g. Improve footwork and consistency" /></View><Text style={{ color: c.textSecondary, lineHeight: 21, marginBottom: 16 }}>Keep the playing area and player visible. Coaching depends on footage quality and the models available for your sport. Unmeasured speed, shot types and tactics will not be reported as facts.</Text>
+        <View pointerEvents={uploading || !!matchId ? "none" : "auto"}><SportPicker value={sport} onChange={setSport} /><Text style={styles.fieldLabel}>Your level</Text><View style={styles.chipRow}>{LEVELS.map(lv => <Pressable key={lv} onPress={() => setLevel(lv)} style={[styles.chip, level === lv && styles.chipActive]}><Text style={[styles.chipText, level === lv && styles.chipTextActive]}>{lv}</Text></Pressable>)}</View><InputField label="Your goal" value={goal} onChangeText={setGoal} placeholder="e.g. Improve footwork and consistency" /></View><Text style={{ color: c.textSecondary, lineHeight: 21, marginBottom: 16 }}>Source footage is deleted after successful analysis; your report remains available. Keep the playing area and player visible. Coaching depends on footage quality and the models available for your sport. Unmeasured speed, shot types and tactics will not be reported as facts.</Text>
         {/* Video picker */}
         {!asset ? (
           <Pressable disabled={uploading || !!matchId} onPress={pick} style={styles.dropzone} testID="upload-pick">

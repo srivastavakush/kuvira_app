@@ -1,7 +1,7 @@
 """AI Coach FastAPI router."""
 from __future__ import annotations
 import asyncio, logging, os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Header
@@ -116,6 +116,8 @@ async def start_analysis(body: AnalyzeBody,user=Depends(current_user),idempotenc
     match=await db.ai_coach_matches.find_one({"id":body.match_id,"user_id":user["id"]}); video=await db.ai_coach_videos.find_one({"id":body.video_id,"user_id":user["id"]})
     if not match: raise HTTPException(404,"Match not found")
     if not video: raise HTTPException(404,"Video not found")
+    if video.get("upload_status") == "pending" or video.get("source_deleted_at"): raise HTTPException(409,"Upload a new video before starting analysis")
+    if video.get("match_id") and video["match_id"] != body.match_id: raise HTTPException(409,"Video belongs to another match")
     if idempotency_key:
         existing=await db.ai_coach_jobs.find_one({"user_id":user["id"],"idempotency_key":idempotency_key},{"_id":0})
         if existing: return existing
@@ -206,3 +208,43 @@ async def knowledge_refresh(user=Depends(require_platform_admin())):
 async def knowledge_seed(user=Depends(require_platform_admin())):
     """Backward-compatible alias for the versioned knowledge refresh endpoint."""
     return await get_default_retriever(db).ingest_documents(seed_documents())
+
+class DirectUploadBody(BaseModel):
+    match_id: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+
+@router.get('/upload-config')
+async def upload_config(user=Depends(current_user)):
+    return {'max_bytes':min(MAX_VIDEO_BYTES,2*1024*1024*1024),'direct':os.environ.get('AI_COACH_STORAGE_BACKEND')=='gcs'}
+
+@router.post('/videos/upload-session')
+async def upload_session(body:DirectUploadBody,user=Depends(current_user),origin:Optional[str]=Header(None)):
+    from deps import CORS_ALLOWED_ORIGINS
+    if origin and origin not in CORS_ALLOWED_ORIGINS:raise HTTPException(403,'Upload origin is not allowed')
+    if body.size_bytes<1 or body.size_bytes>min(MAX_VIDEO_BYTES,2*1024*1024*1024):raise HTTPException(413,'Video exceeds configured limit')
+    ext=Path(body.filename).suffix.lower()
+    if ext not in ALLOWED_EXT or not body.mime_type.startswith('video/'):raise HTTPException(400,'Choose a supported video file')
+    if not await db.ai_coach_matches.find_one({'id':body.match_id,'user_id':user['id']}):raise HTTPException(404,'Match not found')
+    cutoff=(datetime.now(timezone.utc)-timedelta(hours=1)).isoformat()
+    if await db.ai_coach_videos.count_documents({'user_id':user['id'],'upload_status':'pending','created_at':{'$gt':cutoff}})>=5:raise HTTPException(429,'Finish an existing upload or try again later')
+    vid=gen_id()
+    result=await asyncio.to_thread(_get_storage().start_upload,vid,ext,body.size_bytes,body.mime_type,origin)
+    doc={'id':vid,'user_id':user['id'],'match_id':body.match_id,'original_filename':body.filename[:200],
+         'mime_type':body.mime_type,'size_bytes':body.size_bytes,'storage':result['storage'],'upload_status':'pending','created_at':_iso()}
+    await db.ai_coach_videos.insert_one(doc)
+    return {'id':vid,'upload_url':result['upload_url'],'chunk_bytes':8*1024*1024}
+
+@router.post('/videos/{video_id}/complete')
+async def complete_upload(video_id:str,user=Depends(current_user)):
+    video=await db.ai_coach_videos.find_one({'id':video_id,'user_id':user['id']},{'_id':0})
+    if not video:raise HTTPException(404,'Video not found')
+    if video.get('source_deleted_at'):raise HTTPException(410,'Source video was already deleted')
+    if video.get('upload_status')=='complete':return {'id':video_id,'size_bytes':video['size_bytes']}
+    try:reference=await asyncio.to_thread(_get_storage().verify_upload,video['storage'],video['size_bytes'])
+    except ValueError:raise HTTPException(400,'Uploaded video size does not match')
+    except Exception:raise HTTPException(409,'Upload is not complete; retry the upload')
+    await db.ai_coach_videos.update_one({'id':video_id,'user_id':user['id']},{'$set':{'storage':reference,'upload_status':'complete'}})
+    await db.ai_coach_matches.update_one({'id':video['match_id'],'user_id':user['id']},{'$set':{'video_id':video_id}})
+    return {'id':video_id,'size_bytes':video['size_bytes']}

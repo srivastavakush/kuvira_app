@@ -21,6 +21,8 @@ async def main() -> None:
                 "AI Coach production model preflight failed: "
                 + "; ".join(preflight["errors"])
             )
+    from maintenance import maintenance_loop
+    maintenance_task = asyncio.create_task(maintenance_loop())
     poll_seconds = float(os.environ.get("AI_COACH_WORKER_POLL_SECONDS", "2"))
     batch_size = int(os.environ.get("AI_COACH_WORKER_BATCH_SIZE", "1"))
     while True:

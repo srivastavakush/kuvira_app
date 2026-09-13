@@ -1,3 +1,4 @@
+import { sendVideoChunks } from './direct-upload';
 import { notifySession } from './session-events';
 import { friendlyError } from './errors';
 // API client for the MatchDrome backend.
@@ -33,8 +34,9 @@ function resolveBaseUrl(): string {
 const BASE = resolveBaseUrl();
 export const apiBaseUrl = BASE;
 const TOKEN_KEY = 'kuvira_auth_token';
+const uploadSessions=new Map<string,any>();
 export async function getToken(): Promise<string|null>{return await storage.secureGet<string>(TOKEN_KEY,'');}
-export async function setToken(token:string){const saved = await storage.secureSet(TOKEN_KEY,token);if (!saved) throw new Error('Could not save your session. Please allow storage and try again.');notifySession();} export async function clearToken(){await storage.secureRemove(TOKEN_KEY);notifySession();}
+export async function setToken(token:string){const saved = await storage.secureSet(TOKEN_KEY,token);if (!saved) throw new Error('Could not save your session. Please allow storage and try again.');notifySession();} export async function clearToken(){uploadSessions.clear();await storage.secureRemove(TOKEN_KEY);notifySession();}
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); this.name = 'ApiError'; } }
 export class ApiConnectionError extends Error {
   constructor() {
@@ -103,6 +105,20 @@ async function uploadMultipart<T=any>(path:string,fileUri:string,_fileName:strin
   return data as T;
 }
 export const api={
+  myRegistrations:()=>request('/registrations/mine'),
+  supportResources:()=>request('/support/resources'),
+  supportTickets:()=>request('/support/tickets'),
+  createTicket:(p:any)=>request('/support/tickets',{method:'POST',body:JSON.stringify(p)}),
+  deleteAccount:()=>request('/account/deletion',{method:'POST',body:JSON.stringify({confirmation:'DELETE'})}),
+  reportPost:(id:string,reason:string)=>request(`/posts/${id}/report`,{method:'POST',body:JSON.stringify({reason})}),
+  blockUser:(id:string)=>request(`/users/${id}/block`,{method:'POST'}),
+  unblockUser:(id:string)=>request(`/users/${id}/block`,{method:'DELETE'}),
+  blockedUsers:()=>request('/users/me/blocked'),
+  communityConsent:()=>request('/community/consent',{method:'POST',body:JSON.stringify({version:'2026-09-13'})}),
+  updateSupportTicket:(id:string,p:any)=>request(`/admin/support-tickets/${id}`,{method:'PATCH',body:JSON.stringify(p)}),
+  adminSupportTickets:()=>request('/admin/support-tickets'),
+  adminCommunityReports:()=>request('/admin/community-reports'),
+  moderateReport:(id:string,action:string)=>request(`/admin/community-reports/${id}`,{method:'POST',body:JSON.stringify({action})}),
   adminOverview:()=>request('/admin/overview'), adminUsers:(q='')=>request(`/admin/users?q=${encodeURIComponent(q)}`), adminTransactions:()=>request('/admin/transactions'), adminSystemHealth:()=>request('/admin/system-health'),
   health:()=>request('/health'), otpStart:(mobile:string)=>request('/auth/otp/start',{method:'POST',body:JSON.stringify({mobile})}), otpVerify:(mobile:string,otp:string)=>request('/auth/otp/verify',{method:'POST',body:JSON.stringify({mobile,otp})}), me:()=>request('/me'), onboarding:(p:any)=>request('/onboarding',{method:'POST',body:JSON.stringify(p)}),
   sports:()=>request('/sports'), facilities:(p:any={})=>request(`/facilities${Object.keys(p).length?'?'+new URLSearchParams(p).toString():''}`), facility:(id:string)=>request(`/facilities/${id}`), availability:(id:string,date:string)=>request(`/facilities/${id}/availability?date=${date}`),
@@ -118,12 +134,25 @@ export const api={
   event:(id:string)=>request(`/events/${id}`),
   tournaments:(p?:{city?:string,published_only?:boolean})=>request(`/tournaments${p&&Object.keys(p).length?'?'+new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([,v])=>v!=null).map(([k,v])=>[k,String(v)]))).toString():''}`),
   tournament:(id:string)=>request(`/tournaments/${id}`),
-  registerTournament:(id:string)=>request(`/tournaments/${id}/register`,{method:'POST'}),
-  products:(p:any={})=>request(`/products${Object.keys(p).length?'?'+new URLSearchParams(p).toString():''}`),product:(id:string)=>request(`/products/${id}`),recommendedProducts:()=>request('/products/recommend/for-me'),cart:()=>request('/cart'),addToCart:(product_id:string,qty=1)=>request('/cart/add',{method:'POST',body:JSON.stringify({product_id,qty})}),removeFromCart:(product_id:string)=>request('/cart/remove',{method:'POST',body:JSON.stringify({product_id,qty:1})}),createOrder:(address:any)=>request('/orders',{method:'POST',body:JSON.stringify({address})}),myOrders:()=>request('/orders/mine'),
+  registerTournament:(id:string,customer_email?:string)=>request(`/tournaments/${id}/register`,{method:'POST',body:JSON.stringify({customer_email})}),
+  products:(p:any={})=>request(`/products${Object.keys(p).length?'?'+new URLSearchParams(p).toString():''}`),product:(id:string)=>request(`/products/${id}`),recommendedProducts:()=>request('/products/recommend/for-me'),cart:()=>request('/cart'),addToCart:(product_id:string,qty=1)=>request('/cart/add',{method:'POST',body:JSON.stringify({product_id,qty})}),removeFromCart:(product_id:string)=>request('/cart/remove',{method:'POST',body:JSON.stringify({product_id,qty:1})}),createOrder:(address:any,customer_email?:string)=>request('/orders',{method:'POST',body:JSON.stringify({address,customer_email})}),myOrders:()=>request('/orders/mine'),
   aiChat:(text:string,session_id?:string)=>request('/ai/coach/chat',{method:'POST',body:JSON.stringify({text,session_id})}),aiHistory:(session_id?:string)=>request(`/ai/coach/history${session_id?'?session_id='+session_id:''}`),aiInsights:()=>request('/ai/insights'),aiRecommendations:()=>request('/ai/recommendations'),
   aiCoach:{
     createMatch:(p:any)=>request('/ai-coach/matches',{method:'POST',body:JSON.stringify(p)}),listMatches:()=>request('/ai-coach/matches'),
-    uploadVideo:(fileUri:string,matchId?:string,fileName='match.mp4',mimeType='video/mp4',onProgress?:(percent:number)=>void)=>uploadMultipart('/ai-coach/videos',fileUri,fileName,mimeType,matchId?{match_id:matchId}:{},onProgress),
+    uploadConfig:()=>request('/ai-coach/upload-config'),
+    uploadVideo:async(fileUri:string,matchId?:string,fileName='match.mp4',mimeType='video/mp4',onProgress?:(percent:number)=>void)=>{
+      const config=await request('/ai-coach/upload-config');
+      if(!config.direct)return uploadMultipart('/ai-coach/videos',fileUri,fileName,mimeType,matchId?{match_id:matchId}:{},onProgress);
+      const size=Platform.OS==='web'?(await (await fetch(fileUri)).blob()).size:new ExpoFile(fileUri).size;
+      if(size>config.max_bytes)throw new Error(`Choose a video under ${Math.floor(config.max_bytes/1024/1024)} MB`);
+      const cacheKey=`${await getToken()}:${matchId}:${fileUri}:${size}`;
+      const cached=uploadSessions.get(cacheKey);
+      const session=cached||await request('/ai-coach/videos/upload-session',{method:'POST',body:JSON.stringify({match_id:matchId,filename:fileName,mime_type:mimeType,size_bytes:size})});
+      uploadSessions.set(cacheKey,session);
+      await sendVideoChunks(session.upload_url,fileUri,session.chunk_bytes,onProgress,!!cached);
+      const result=await request(`/ai-coach/videos/${session.id}/complete`,{method:'POST'});
+      uploadSessions.delete(cacheKey);return result;
+    },
     startAnalysis:(match_id:string,video_id:string)=>request('/ai-coach/analyze',{method:'POST',body:JSON.stringify({match_id,video_id})}),analysisStatus:(job_id:string)=>request(`/ai-coach/analysis/${job_id}`),matchReport:(match_id:string,refresh=false)=>request(`/ai-coach/match/${match_id}/report${refresh?'?refresh=true':''}`),playerPerformance:()=>request('/ai-coach/player-performance'),
     chat:(text:string,opts:{session_id?:string;match_id?:string}={})=>request('/ai-coach/chat',{method:'POST',body:JSON.stringify({text,...opts})}),history:(session_id?:string)=>request(`/ai-coach/history${session_id?'?session_id='+session_id:''}`),seedKnowledge:()=>request('/ai-coach/knowledge/seed',{method:'POST'}),
     coachingState:()=>request('/ai-coach/coaching-state'),createGoal:(title:string,target?:string,due_at?:string)=>request('/ai-coach/goals',{method:'POST',body:JSON.stringify({title,target,due_at})}),updateGoal:(id:string,status:string)=>request(`/ai-coach/goals/${id}`,{method:'PATCH',body:JSON.stringify({status})}),training:()=>request('/ai-coach/training'),trainingOutcome:(id:string,status:string,outcome?:any)=>request(`/ai-coach/training/${id}/outcome`,{method:'POST',body:JSON.stringify({status,outcome})}),

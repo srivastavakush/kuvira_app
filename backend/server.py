@@ -34,8 +34,10 @@ from deps import (
 import otp_service
 import features
 import org_admin
+import trust
 from public_profiles import public_player
-from payments import PayU, checkout_html, create_checkout, process_callback
+from payments import PayU, checkout_html, create_checkout, process_callback, reconcile_payment
+from reservations import reserve_order, reserve_tournament, reserve_booking
 from profile_media import ProfileMediaStorage
 
 PLATFORM_ADMIN_MOBILES = [m.strip() for m in os.environ.get("PLATFORM_ADMIN_MOBILES", "").split(",") if m.strip()]
@@ -111,7 +113,7 @@ class PostCreate(BaseModel):
 
 class CartAdd(BaseModel):
     product_id: str
-    qty: int = 1
+    qty: int = Field(default=1, ge=1, le=100)
 
 class OrderCreate(BaseModel):
     address: Dict[str, str]
@@ -138,15 +140,14 @@ async def ensure_indexes():
     await db.users.create_index("mobile", unique=True)
     await db.users.create_index("referral_code", sparse=True)
     await db.users.create_index([("location", "2dsphere")], sparse=True)
-    # Concurrency-safe booking: one confirmed booking per court/date/slot
-    await db.bookings.create_index(
-        [("facility_id", 1), ("court_number", 1), ("date", 1), ("slot", 1)],
-        unique=True, name="uniq_slot",
-    )
+    # Keep historical cancelled records while allowing the same slot to be booked again.
+    for collection, owner, old_name in [(db.bookings, "facility_id", "uniq_slot"), (db.coach_sessions,"coach_id","uniq_coach_slot")]:
+        await collection.update_many({"status":{"$in":["cancelled","expired","failed"]}}, {"$set":{"slot_active":False}})
+        await collection.update_many({"status":{"$nin":["cancelled","expired","failed"]}}, {"$set":{"slot_active":True}})
+        keys=[(owner,1)] + ([("court_number",1)] if owner=="facility_id" else []) + [("date",1),("slot",1)]
+        await collection.create_index(keys,unique=True,name=old_name+"_active",partialFilterExpression={"slot_active":True})
+        if old_name in await collection.index_information(): await collection.drop_index(old_name)
     await db.bookings.create_index("user_id")
-    await db.coach_sessions.create_index(
-        [("coach_id", 1), ("date", 1), ("slot", 1)], unique=True, name="uniq_coach_slot",
-    )
     await db.coach_sessions.create_index("user_id")
     await db.organization_memberships.create_index([("user_id", 1), ("org_id", 1)], unique=True)
     await db.organization_memberships.create_index("org_id")
@@ -157,6 +158,9 @@ async def ensure_indexes():
     await db.orders.create_index("user_id")
     await db.payment_transactions.create_index("txnid", unique=True)
     await db.payment_transactions.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
+    await db.user_blocks.create_index([("user_id", 1), ("target_id", 1)], unique=True)
+    await db.community_reports.create_index([("user_id", 1), ("post_id", 1)], unique=True)
+    await db.account_deletions.create_index("user_id", unique=True)
     await db.posts.create_index("created_at")
     await db.training_plans.create_index("user_id")
     await db.training_activity.create_index([("user_id", 1), ("day", 1)], unique=True)
@@ -467,18 +471,18 @@ async def facility_availability(fid: str, date: str):
 
     # Confirmed bookings (cancelled bookings free the slot)
     booked = await db.bookings.find(
-        {"facility_id": fid, "date": date, "status": {"$ne": "cancelled"}}, {"_id": 0}
+        {"facility_id": fid, "date": date, "status": {"$nin": ["cancelled", "expired", "failed"]}}, {"_id": 0}
     ).to_list(200)
     booked_set = {(b["court_number"], b["slot"]) for b in booked}
 
     # Slot overrides created by Manager/Admin (block or explicit open)
     overrides_raw = await db.facility_slots.find(
-        {"facility_id": fid, "date": date}, {"_id": 0}
+        {"facility_id": fid, "date": {"$in": [date, "*"]}}, {"_id": 0}
     ).to_list(500)
     # Map (court_number, slot) -> status
-    slot_overrides: dict = {
-        (o["court_number"], o["slot"]): o["status"] for o in overrides_raw
-    }
+    # A recurring or dated closure must agree with the booking write check.
+    slot_overrides = {(o["court_number"], o["slot"]): "blocked"
+                      for o in overrides_raw if o["status"] == "blocked"}
 
     courts = []
     for court_num in range(1, f["courts_count"] + 1):
@@ -508,57 +512,7 @@ async def facility_availability(fid: str, date: str):
 
 @api.post("/bookings")
 async def create_booking(body: BookingCreate, user=Depends(current_user)):
-    f = await db.facilities.find_one({"id": body.facility_id}, {"_id": 0})
-    if not f:
-        raise KuviraError(404, "FACILITY_NOT_FOUND", "Facility not found")
-    if body.court_number < 1 or body.court_number > f.get("courts_count", 1):
-        raise KuviraError(400, "INVALID_COURT", "Invalid court number")
-
-    # Reject if slot is explicitly blocked by a Manager/Admin override
-    slot_override = await db.facility_slots.find_one({
-        "facility_id": body.facility_id,
-        "court_number": body.court_number,
-        "date": body.date,
-        "slot": body.slot,
-        "status": "blocked",
-    })
-    if slot_override:
-        raise KuviraError(409, "SLOT_BLOCKED", "This slot has been blocked by the facility manager.")
-
-    price = f["price_per_hour"]  # server-side price; client value is never trusted
-    booking = {
-        "id": gen_id(),
-        "user_id": user["id"],
-        "facility_id": body.facility_id,
-        "facility_name": f["name"],
-        "facility_image": f.get("image", ""),
-        "court_number": body.court_number,
-        "date": body.date,
-        "slot": body.slot,
-        "duration_min": body.duration_min,
-        "price": price,
-        "status": "pending_payment" if PAYMENT_PROVIDER == "payu" else "confirmed",
-        "payment": {"provider": "payu", "status": "initiated", "amount": price} if PAYMENT_PROVIDER == "payu" else {"provider": "mock_payu", "status": "paid", "amount": price},
-        "created_at": utcnow().isoformat(),
-    }
-    try:
-        # Unique index on (facility_id, court_number, date, slot) makes this atomic.
-        await db.bookings.insert_one(booking.copy())
-    except DuplicateKeyError:
-        raise KuviraError(409, "BOOKING_SLOT_UNAVAILABLE", "This slot is no longer available.")
-    if PAYMENT_PROVIDER != "payu":
-        return strip_id(booking)
-    try:
-        checkout = await create_checkout(
-            db, user=user, resource={"kind": "booking", "id": booking["id"]}, amount=price,
-            productinfo=f"Court booking - {f['name']}", customer_email=body.customer_email,
-        )
-        await db.bookings.update_one({"id": booking["id"]}, {"$set": {"payment": {**checkout["payment"], "provider": "payu"}}})
-        booking["payment"] = {**checkout["payment"], "provider": "payu"}
-        return {"booking": strip_id(booking), **checkout}
-    except Exception:
-        await db.bookings.delete_one({"id": booking["id"], "status": "pending_payment"})
-        raise
+    return await reserve_booking(db,body,user)
 
 @api.get("/bookings/mine")
 async def my_bookings(user=Depends(current_user)):
@@ -572,6 +526,8 @@ async def payu_checkout(payment_id: str, token: str):
     txn = await db.payment_transactions.find_one({"id": payment_id, "checkout_token": token}, {"_id": 0})
     if not txn or txn.get("status") != "initiated":
         raise HTTPException(404, "Payment checkout is no longer available")
+    if txn.get("expires_at") and txn["expires_at"] < utcnow().isoformat():
+        raise HTTPException(410, "Checkout expired; please make a new booking")
     payu = PayU()
     return HTMLResponse(checkout_html(payu.checkout_endpoint, payu.checkout_fields(txn)))
 
@@ -581,9 +537,12 @@ async def payment_status(payment_id: str, user=Depends(current_user)):
     txn = await db.payment_transactions.find_one({"id": payment_id, "user_id": user["id"]}, {"_id": 0, "checkout_token": 0, "payu_response": 0})
     if not txn:
         raise HTTPException(404, "Payment not found")
+    if txn.get("status") != "succeeded":
+        await reconcile_payment(db, txn)
+        txn = await db.payment_transactions.find_one({"id": payment_id}, {"_id":0,"checkout_token":0,"payu_response":0,"verification":0})
     resource = txn.get("resource") or {}
     collection = {"booking": db.bookings, "coach_session": db.coach_sessions, "tournament_registration": db.tournament_registrations, "order": db.orders}.get(resource.get("kind"))
-    item = await collection.find_one({"id": resource.get("id")}, {"_id": 0}) if collection else None
+    item = await collection.find_one({"id": resource.get("id")}, {"_id": 0}) if collection is not None else None
     return {"payment": txn, "resource": item}
 
 
@@ -730,6 +689,8 @@ async def get_tournament(tid:str):
     return t
 @api.post('/tournaments/{tid}/register')
 async def register_tournament(tid: str, body: Optional[PaymentContact] = None, user=Depends(current_user)):
+    if PAYMENT_PROVIDER == "payu":
+        return await reserve_tournament(db,tid,user,body.customer_email if body else None)
     t = await db.tournaments.find_one({'id': tid}, {'_id': 0})
     if not t: raise HTTPException(404, 'Tournament not found')
     reg = {'id': gen_id(), 'user_id': user['id'], 'tournament_id': tid, 'status': 'pending_payment' if PAYMENT_PROVIDER == 'payu' else 'confirmed', 'payment': {'provider': 'payu', 'status': 'initiated', 'amount': t['entry_fee']} if PAYMENT_PROVIDER == 'payu' else {'provider': 'mock_payu', 'status': 'paid', 'amount': t['entry_fee']}, 'created_at': utcnow().isoformat()}
@@ -749,9 +710,17 @@ async def _enrich_post(p:dict,user_id:Optional[str])->dict:
     author=await db.players.find_one({'id':p['author_id']},{'_id':0}) or await db.users.find_one({'id':p['author_id']},{'_id':0}); p['author']=public_player(author); p['liked']=bool(user_id and await db.post_likes.find_one({'post_id':p['id'],'user_id':user_id})); return p
 @api.get('/posts')
 async def list_posts(user=Depends(optional_user)):
-    items=await db.posts.find({'is_demo': {'$ne': True}}, {'_id':0}).sort('created_at',-1).to_list(100); return [await _enrich_post(p,user['id'] if user else None) for p in items]
+    blocked=[]
+    if user:
+        blocks=await db.user_blocks.find({'$or':[{'user_id':user['id']},{'target_id':user['id']}]},{'_id':0}).to_list(1000)
+        blocked=[b['target_id'] if b['user_id']==user['id'] else b['user_id'] for b in blocks]
+    items=await db.posts.find({'is_demo':{'$ne':True},'moderation_status':{'$ne':'hidden'},'author_id':{'$nin':blocked}},{'_id':0}).sort('created_at',-1).to_list(100)
+    return [await _enrich_post(p,user['id'] if user else None) for p in items]
 @api.post('/posts')
 async def create_post(body:PostCreate,user=Depends(current_user)):
+    if user.get('community_policy_version') != trust.POLICY_VERSION:
+        raise KuviraError(409,'CONSENT_REQUIRED','Please accept the community rules before posting')
+    if not body.content.strip() or len(body.content)>4000:raise KuviraError(400,'INVALID_CONTENT','Write between 1 and 4000 characters')
     post={'id':gen_id(),'author_id':user['id'],'content':body.content,'image':body.image,'likes':0,'comments_count':0,'created_at':utcnow().isoformat()}; await db.posts.insert_one(post.copy()); return await _enrich_post(strip_id(post),user['id'])
 @api.post('/posts/{pid}/like')
 async def toggle_like(pid:str,user=Depends(current_user)):
@@ -805,6 +774,8 @@ async def cart_remove(body:CartAdd,user=Depends(current_user)):
     return await get_cart(user)
 @api.post('/orders')
 async def create_order(body: OrderCreate, user=Depends(current_user)):
+    if PAYMENT_PROVIDER == "payu":
+        return await reserve_order(db,user,body.address,body.customer_email)
     cart = await db.carts.find_one({'user_id': user['id']}, {'_id': 0})
     if not cart or not cart.get('items'): raise HTTPException(400, 'Cart is empty')
     line_items=[]; total=0
@@ -911,6 +882,7 @@ async def capabilities(caps=Depends(current_capabilities)): return caps
 app.include_router(api)
 app.include_router(features.router)
 app.include_router(org_admin.router)
+app.include_router(trust.router)
 from ai_coach.router import router as ai_coach_router
 app.include_router(ai_coach_router)
 app.add_middleware(

@@ -81,9 +81,11 @@ def validate_runtime_config() -> None:
         errors.append("Twilio Verify credentials are required when OTP_PROVIDER=twilio")
     if not CORS_ALLOWED_ORIGINS or "*" in CORS_ALLOWED_ORIGINS or any(not origin.startswith("https://") for origin in CORS_ALLOWED_ORIGINS):
         errors.append("CORS_ALLOWED_ORIGINS must contain explicit https origins in production")
-    if PAYMENT_PROVIDER in {"", "mock", "mock_payu"}:
-        errors.append("PAYMENT_PROVIDER must be a real configured provider in production")
+    if PAYMENT_PROVIDER != "payu":
+        errors.append("PAYMENT_PROVIDER must be payu in production")
     if PAYMENT_PROVIDER == "payu":
+        if os.environ.get("PAYU_MODE", "").lower() != "live":
+            errors.append("PAYU_MODE must be live in production; use staging for test payments")
         if not os.environ.get("PAYU_MERCHANT_KEY") or not os.environ.get("PAYU_MERCHANT_SALT"):
             errors.append("PAYU_MERCHANT_KEY and PAYU_MERCHANT_SALT are required for PayU")
         callback_base = os.environ.get("PAYU_CALLBACK_BASE_URL", "")
@@ -249,6 +251,8 @@ async def current_user(authorization: Optional[str] = Header(None)) -> dict:
     except jwt.PyJWTError: raise KuviraError(401, "TOKEN_INVALID", "Invalid token")
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
     if not user: raise KuviraError(401, "USER_NOT_FOUND", "User not found")
+    if user.get("deleted") or user.get("deletion_requested"):
+        raise KuviraError(401, "ACCOUNT_DISABLED", "This account has been disabled for deletion")
     user_id_ctx.set(user["id"]); return user
 
 async def optional_user(authorization: Optional[str] = Header(None)) -> Optional[dict]:
