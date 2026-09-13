@@ -718,7 +718,7 @@ async def org_cancel_booking(
     await db.bookings.update_one(
         {"id": booking_id},
         {"$set": {
-            "status": "cancelled",
+            "status": "cancelled", "slot_active": False,
             "cancelled_by": user["id"],
             "cancelled_at": utcnow().isoformat(),
             "cancellation_source": "club_staff",
@@ -1175,7 +1175,7 @@ async def admin_users(q: str = "", admin=Depends(require_platform_admin())):
 @router.get("/admin/transactions")
 async def admin_transactions(admin=Depends(require_platform_admin())):
     # Allowlist deliberately excludes checkout tokens, gateway payloads and signatures.
-    return await db.payment_transactions.find({}, {"_id": 0, "id": 1, "txnid": 1, "status": 1, "amount": 1, "resource": 1, "created_at": 1, "provider": 1}).sort("created_at", -1).to_list(100)
+    return await db.payment_transactions.find({}, {"_id": 0, "id": 1, "txnid": 1, "status": 1, "amount": 1, "resource": 1, "created_at": 1, "provider": 1, "requires_review": 1, "refund_status": 1}).sort("created_at", -1).to_list(100)
 
 
 @router.get("/admin/system-health")

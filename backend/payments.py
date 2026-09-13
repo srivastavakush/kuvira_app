@@ -25,7 +25,9 @@ def _now() -> str:
 
 def _amount(value: Any) -> str:
     try:
-        return f"{Decimal(str(value)).quantize(Decimal('0.01')):.2f}"
+        amount = Decimal(str(value)).quantize(Decimal('0.01'))
+        if not amount.is_finite() or amount < 0: raise ValueError('Invalid amount')
+        return f"{amount:.2f}"
     except (InvalidOperation, ValueError):
         raise KuviraError(400, "INVALID_PAYMENT_AMOUNT", "Payment amount is invalid")
 
@@ -56,7 +58,7 @@ class PayU:
             self.key, fields["txnid"], fields["amount"], fields["productinfo"],
             fields["firstname"], fields["email"], fields.get("udf1", ""),
             fields.get("udf2", ""), fields.get("udf3", ""), fields.get("udf4", ""),
-            fields.get("udf5", ""), "", "", "", "", "", "", self.salt,
+            fields.get("udf5", ""), "", "", "", "", "", self.salt,
         ])
         return self._digest(plain)
 
@@ -121,8 +123,9 @@ def _payu() -> PayU:
 
 async def create_checkout(
     db: Any, *, user: dict[str, Any], resource: dict[str, Any], amount: Any,
-    productinfo: str, customer_email: str | None = None,
+    productinfo: str, customer_email: str | None = None, session=None,
 ) -> dict[str, Any]:
+    from reservations import expires_at
     payu = _payu()
     email = (customer_email or user.get("email") or "").strip().lower()
     if not email or "@" not in email:
@@ -131,14 +134,14 @@ async def create_checkout(
     payment_id, token = gen_id(), secrets.token_urlsafe(32)
     txn = {
         "id": payment_id, "txnid": txnid, "provider": "payu", "mode": payu.mode,
-        "status": "initiated", "amount": _amount(amount), "productinfo": productinfo[:100],
+        "expires_at": expires_at(), "status": "initiated", "amount": _amount(amount), "productinfo": productinfo[:100],
         "user_id": user["id"], "customer": {
             "firstname": (user.get("name") or "Player")[:60], "email": email,
             "phone": str(user.get("mobile") or "")[:20],
         },
         "resource": resource, "checkout_token": token, "created_at": _now(), "updated_at": _now(),
     }
-    await db.payment_transactions.insert_one(txn.copy())
+    await db.payment_transactions.insert_one(txn.copy(), **({"session":session} if session else {}))
     return {
         "payment": {"id": payment_id, "txnid": txnid, "status": "initiated", "amount": txn["amount"]},
         "checkout_url": f"/api/payments/checkout/{payment_id}?token={token}",
@@ -155,69 +158,76 @@ def checkout_html(action: str, fields: dict[str, str]) -> str:
 
 async def process_callback(db: Any, payload: dict[str, Any]) -> dict[str, Any]:
     payu = _payu()
-    txnid = str(payload.get("txnid") or "")
-    txn = await db.payment_transactions.find_one({"txnid": txnid}, {"_id": 0})
+    txn = await db.payment_transactions.find_one({"txnid": str(payload.get("txnid") or "")}, {"_id": 0})
     if not txn:
         raise KuviraError(404, "PAYMENT_NOT_FOUND", "Unknown payment transaction")
+    # Never mutate stored financial state from an unauthenticated callback.
     if not payu.valid_response_hash(payload):
-        await db.payment_transactions.update_one({"id": txn["id"]}, {"$set": {"status": "invalid_callback", "updated_at": _now()}})
         raise KuviraError(400, "PAYU_HASH_INVALID", "Payment callback could not be verified")
     if _amount(payload.get("amount")) != txn["amount"]:
         raise KuviraError(400, "PAYU_AMOUNT_MISMATCH", "Payment amount does not match")
-
-    # The browser return/webhook is not sufficient by itself. Reconcile with
-    # PayU's server before any booking, registration, or order is fulfilled.
-    verification = await payu.verify(txnid)
-    verified_status = str(verification.get("status") or "").lower()
-    if verified_status != "success":
-        status = "failed" if verified_status in {"failure", "failed"} else "verification_pending"
-        await db.payment_transactions.update_one({"id": txn["id"]}, {"$set": {
-            "status": status, "payu_response": payload, "verification": verification, "updated_at": _now(),
-        }})
-        return {"payment": {"id": txn["id"], "status": status}, "resource": None}
-    await db.payment_transactions.update_one({"id": txn["id"]}, {"$set": {
-        "status": "succeeded", "payu_response": payload, "verification": verification, "updated_at": _now(),
-    }})
-    resource = await fulfill_succeeded_payment(db, txn)
-    await db.payment_transactions.update_one({"id": txn["id"]}, {"$set": {"fulfilled_at": _now(), "updated_at": _now()}})
-    return {"payment": {"id": txn["id"], "status": "succeeded"}, "resource": resource}
+    return await reconcile_payment(db, txn)
 
 
-async def fulfill_succeeded_payment(db: Any, txn: dict[str, Any]) -> dict[str, Any] | None:
-    """Idempotently turn a verified payment into the requested app resource."""
-    resource = txn["resource"]
-    kind, resource_id = resource.get("kind"), resource.get("id")
-    payment = {"provider": "payu", "status": "paid", "amount": txn["amount"], "payment_id": txn["id"], "txnid": txn["txnid"]}
-    if kind == "booking":
-        existing = await db.bookings.find_one({"id": resource_id}, {"_id": 0})
-        if not existing:
-            raise KuviraError(409, "PAYMENT_RESOURCE_MISSING", "Reserved booking is unavailable")
-        if existing.get("status") == "pending_payment":
-            await db.bookings.update_one({"id": resource_id, "status": "pending_payment"}, {"$set": {"status": "confirmed", "payment": payment, "confirmed_at": _now()}})
-        return await db.bookings.find_one({"id": resource_id}, {"_id": 0})
-    if kind == "coach_session":
-        existing = await db.coach_sessions.find_one({"id": resource_id}, {"_id": 0})
-        if not existing:
-            raise KuviraError(409, "PAYMENT_RESOURCE_MISSING", "Reserved coach session is unavailable")
-        if existing.get("status") == "pending_payment":
-            await db.coach_sessions.update_one({"id": resource_id, "status": "pending_payment"}, {"$set": {"status": "confirmed", "payment": payment, "confirmed_at": _now()}})
-        return await db.coach_sessions.find_one({"id": resource_id}, {"_id": 0})
-    if kind == "tournament_registration":
-        existing = await db.tournament_registrations.find_one({"id": resource_id}, {"_id": 0})
-        if not existing:
-            raise KuviraError(409, "PAYMENT_RESOURCE_MISSING", "Tournament registration is unavailable")
-        if existing.get("status") == "pending_payment":
-            result = await db.tournament_registrations.update_one({"id": resource_id, "status": "pending_payment"}, {"$set": {"status": "confirmed", "payment": payment, "confirmed_at": _now()}})
-            if result.modified_count:
-                await db.tournaments.update_one({"id": existing["tournament_id"]}, {"$inc": {"participants_count": 1}})
-        return await db.tournament_registrations.find_one({"id": resource_id}, {"_id": 0})
-    if kind == "order":
-        existing = await db.orders.find_one({"id": resource_id}, {"_id": 0})
-        if not existing:
-            raise KuviraError(409, "PAYMENT_RESOURCE_MISSING", "Order is unavailable")
-        if existing.get("status") == "pending_payment":
-            result = await db.orders.update_one({"id": resource_id, "status": "pending_payment"}, {"$set": {"status": "confirmed", "payment": payment, "confirmed_at": _now()}})
-            if result.modified_count:
-                await db.carts.update_one({"user_id": existing["user_id"]}, {"$set": {"items": []}})
-        return await db.orders.find_one({"id": resource_id}, {"_id": 0})
-    raise KuviraError(400, "UNKNOWN_PAYMENT_RESOURCE", "Unsupported payment resource")
+async def reconcile_payment(db, txn):
+    from reservations import atomic, release
+    verification = await _payu().verify(txn['txnid'])
+    status = str(verification.get('status', '')).lower()
+    if status == 'success':
+        verified_amount = verification.get('amt', verification.get('amount'))
+        if verified_amount is None or _amount(verified_amount) != txn['amount']:
+            raise KuviraError(409, 'PAYU_AMOUNT_MISMATCH', 'Verified payment amount does not match')
+    async def operation(session):
+        current = await db.payment_transactions.find_one({'id':txn['id']}, session=session)
+        if current['status'] == 'succeeded':
+            return {'payment': {'id':txn['id'],'status':'succeeded'}, 'resource':None}
+        if status == 'success':
+            resource = await fulfill_succeeded_payment(db, current, session)
+            await db.payment_transactions.update_one({'id':txn['id']}, {'$set':{
+                'status':'succeeded','verification':verification,'updated_at':_now(),'fulfilled_at':_now(),
+                'requires_review':resource is None,'refund_status':'review_required' if resource is None else 'none'}}, session=session)
+            return {'payment':{'id':txn['id'],'status':'succeeded'},'resource':resource}
+        expired = current.get('expires_at', '') and current['expires_at'] < _now()
+        failed = status in ('failure','failed','dropped','bounced')
+        # A missing gateway record after the checkout window closes is an abandoned checkout.
+        if failed or (expired and (not verification or status == 'not found')):
+            await release(db, current['resource'], session)
+            state = 'failed' if failed else 'expired'
+        else:
+            state = current['status'] if current['status'] in ('failed','expired') else 'verification_pending'
+        await db.payment_transactions.update_one({'id':txn['id']}, {'$set':{'status':state,'updated_at':_now()}}, session=session)
+        return {'payment':{'id':txn['id'],'status':state},'resource':None}
+    return await atomic(db, operation)
+
+
+async def expire_holds(db, limit=30):
+    """Run in maintenance, outside user requests; failures keep reservations intact."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc)-timedelta(minutes=20)).isoformat()
+    docs = await db.payment_transactions.find({'status':{'$in':['initiated','verification_pending']},'created_at':{'$lt':cutoff}}, {'_id':0}).limit(limit).to_list(limit)
+    for txn in docs:
+        if not txn.get('expires_at'):
+            await db.payment_transactions.update_one({'id':txn['id']},{'$set':{'expires_at':cutoff}})
+            txn['expires_at']=cutoff
+        try: await reconcile_payment(db,txn)
+        except Exception: pass  # Retry later; never free a slot on a network error.
+
+
+async def fulfill_succeeded_payment(db, txn, session):
+    resource = txn['resource']; kind, rid = resource['kind'], resource['id']
+    collection = {'booking':db.bookings,'coach_session':db.coach_sessions,'order':db.orders,'tournament_registration':db.tournament_registrations}.get(kind)
+    if collection is None:
+        raise KuviraError(400,'UNKNOWN_PAYMENT_RESOURCE','Unsupported payment resource')
+    item = await collection.find_one({'id':rid},session=session)
+    # A late payment for a released/cancelled reservation requires support/refund review.
+    if not item or item.get('status') not in ('pending_payment','confirmed'):
+        return None
+    if item['status']=='confirmed': return {k:v for k,v in item.items() if k!='_id'}
+    payment={'provider':'payu','status':'paid','amount':txn['amount'],'payment_id':txn['id'],'txnid':txn['txnid']}
+    await collection.update_one({'id':rid,'status':'pending_payment'},{'$set':{'status':'confirmed','payment':payment,'confirmed_at':_now()}},session=session)
+    if kind=='tournament_registration':
+        changes={'participants_count':1}
+        if item.get('inventory_reserved'):changes['reserved_count']=-1
+        await db.tournaments.update_one({'id':item['tournament_id']},{'$inc':changes},session=session)
+    # Do not wipe a cart the customer may have edited while checkout was open.
+    return {'id':rid,'status':'confirmed','payment':payment}

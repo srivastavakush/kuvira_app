@@ -12,6 +12,7 @@ export function AdminOverview({ section = "overview" }: { section?: string }) {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<unknown>();
   const [busy, setBusy] = useState(false);
+  const [editor, setEditor] = useState<any>();
   const [grant, setGrant] = useState<any>();
   const [refreshResult, setRefreshResult] = useState("");
   async function load() {
@@ -19,17 +20,21 @@ export function AdminOverview({ section = "overview" }: { section?: string }) {
     setError(null);
     try {
       setData(
-        await (section === "users"
-          ? api.adminUsers(query)
-          : section === "finance"
-            ? api.adminTransactions()
-            : section === "system"
-              ? api.adminSystemHealth()
-              : section === "issues"
-                ? api.adminIssues()
-                : section === "audit"
-                  ? api.adminAudit()
-                  : api.adminOverview()),
+        await (section === "support"
+          ? api.adminSupportTickets()
+          : section === "moderation"
+            ? api.adminCommunityReports()
+            : section === "users"
+              ? api.adminUsers(query)
+              : section === "finance"
+                ? api.adminTransactions()
+                : section === "system"
+                  ? api.adminSystemHealth()
+                  : section === "issues"
+                    ? api.adminIssues()
+                    : section === "audit"
+                      ? api.adminAudit()
+                      : api.adminOverview()),
       );
     } catch (e) {
       setError(e);
@@ -41,6 +46,8 @@ export function AdminOverview({ section = "overview" }: { section?: string }) {
     load();
   }, [section]);
   const titles: Record<string, string> = {
+    support: "Support tickets",
+    moderation: "Community reports",
     overview: "The whole game, in view.",
     users: "Players & accounts",
     finance: "Payment transactions",
@@ -58,6 +65,88 @@ export function AdminOverview({ section = "overview" }: { section?: string }) {
       </Text>
       <ErrorBanner error={error} retry={load} />
       {busy && !data ? <SkeletonCards /> : null}
+      {section === "support" && (
+        <DataRows
+          rows={data || []}
+          columns={[
+            { key: "id", label: "Ticket" },
+            { key: "email", label: "Reply email" },
+            { key: "message", label: "Message" },
+            { key: "status", label: "Status" },
+            { key: "email_status", label: "Email delivery" },
+          ]}
+          actions={(t) => (
+            <Button
+              label="Respond / update"
+              variant="secondary"
+              onPress={() =>
+                setEditor({
+                  title: "Update support ticket",
+                  fields: [
+                    {
+                      key: "status",
+                      label: "Status",
+                      options: ["open", "in_review", "resolved"].map(
+                        (value) => ({ value, label: value }),
+                      ),
+                    },
+                    {
+                      key: "response",
+                      label: "Response visible to the player",
+                      multiline: true,
+                      required: true,
+                    },
+                  ],
+                  initial: t,
+                  save: async (v: any) => {
+                    await api.updateSupportTicket(t.id, v);
+                    await load();
+                  },
+                })
+              }
+            />
+          )}
+        />
+      )}
+      {section === "moderation" && (
+        <DataRows
+          rows={data || []}
+          columns={[
+            { key: "post_id", label: "Post reference" },
+            {
+              key: "post",
+              label: "Reported content",
+              render: (r) => r.post?.content || "Post removed",
+            },
+            { key: "reason", label: "Report reason" },
+          ]}
+          actions={(r) => (
+            <>
+              <Button
+                label="Hide post"
+                variant="secondary"
+                onPress={() =>
+                  api.moderateReport(r.id, "hide").then(load).catch(setError)
+                }
+              />
+              <Button
+                label="Dismiss"
+                variant="secondary"
+                onPress={() =>
+                  api.moderateReport(r.id, "dismiss").then(load).catch(setError)
+                }
+              />
+            </>
+          )}
+        />
+      )}
+      {editor && (
+        <WorkspaceEditor
+          {...editor}
+          context="Platform support"
+          close={() => setEditor(undefined)}
+        />
+      )}
       {section === "overview" && (
         <>
           <Text style={{ color: c.textSecondary }}>
@@ -199,6 +288,7 @@ export function AdminOverview({ section = "overview" }: { section?: string }) {
               },
               { key: "amount", label: "Amount (₹)" },
               { key: "status", label: "Status" },
+              { key: "refund_status", label: "Payment review" },
               { key: "created_at", label: "Created" },
             ]}
           />
@@ -251,6 +341,7 @@ export function AdminOverview({ section = "overview" }: { section?: string }) {
             { key: "org_id", label: "Club" },
             { key: "title", label: "Issue" },
             { key: "status", label: "Status" },
+            { key: "refund_status", label: "Payment review" },
             { key: "created_at", label: "Reported" },
           ]}
           actions={(i) => (

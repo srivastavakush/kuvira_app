@@ -1,23 +1,38 @@
-import { useSession } from '@/src/session';
-import { useRouter } from 'expo-router';
-import { requireAuth } from '@/src/auth-gate';
-import { ErrorBanner } from '@/src/components/states';
-import { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList, RefreshControl, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
-import { c, spacing, font, radius } from '@/src/theme';
-import { Loader, EmptyState, Divider, Avatar } from '@/src/components/ui';
-import { api } from '@/src/api';
+import { WorkspaceEditor } from "@/src/components/workspace";
+import { Button } from "@/src/components/ui";
+import { useSession } from "@/src/session";
+import { useRouter } from "expo-router";
+import { requireAuth } from "@/src/auth-gate";
+import { ErrorBanner } from "@/src/components/states";
+import { useEffect, useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  FlatList,
+  RefreshControl,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
+import { c, spacing, font, radius } from "@/src/theme";
+import { Loader, EmptyState, Divider, Avatar } from "@/src/components/ui";
+import { api } from "@/src/api";
 
 export default function Community() {
-  const { user } = useSession(); const router = useRouter();
+  const { user } = useSession();
+  const router = useRouter();
+  const [editor, setEditor] = useState<any>();
+  const [agreed, setAgreed] = useState(false);
   const [actionError, setActionError] = useState<unknown>();
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [text, setText] = useState('');
+  const [text, setText] = useState("");
   const [posting, setPosting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -26,33 +41,102 @@ export default function Community() {
       setLoadError(null);
       setPosts(await api.posts());
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Could not load the community right now.');
-    } finally { setLoading(false); }
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Could not load the community right now.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  async function onRefresh() { setRefreshing(true); await load(); setRefreshing(false); }
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
   async function post(authenticated = false) {
-    if (!authenticated && !requireAuth(user, router, undefined, () => post(true))) return;
+    if (
+      !authenticated &&
+      !requireAuth(user, router, undefined, () => post(true))
+    )
+      return;
     if (!text.trim()) return;
+    if (!agreed) {
+      setActionError(
+        "Please read and accept the community rules before posting.",
+      );
+      return;
+    }
     setPosting(true);
-    try { await api.createPost({ content: text.trim() }); setText(''); await load(); }
-    catch(e) { setActionError(e); } finally { setPosting(false); }
+    try {
+      await api.communityConsent();
+      await api.createPost({ content: text.trim() });
+      setText("");
+      await load();
+    } catch (e) {
+      setActionError(e);
+    } finally {
+      setPosting(false);
+    }
   }
   async function like(id: string, authenticated = false) {
-    if (!authenticated && !requireAuth(user, router, undefined, () => like(id, true))) return;
+    if (
+      !authenticated &&
+      !requireAuth(user, router, undefined, () => like(id, true))
+    )
+      return;
     const previous = posts;
-    setPosts((prev) => prev.map((p) => p.id === id ? { ...p, liked: !p.liked, likes: p.likes + (p.liked ? -1 : 1) } : p));
-    try { await api.likePost(id); } catch(e) { setPosts(previous); setActionError(e); }
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === id
+          ? { ...p, liked: !p.liked, likes: p.likes + (p.liked ? -1 : 1) }
+          : p,
+      ),
+    );
+    try {
+      await api.likePost(id);
+    } catch (e) {
+      setPosts(previous);
+      setActionError(e);
+    }
   }
 
   return (
-    <SafeAreaView style={styles.wrap} edges={['top']} testID="community-screen">
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+    <SafeAreaView style={styles.wrap} edges={["top"]} testID="community-screen">
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={{ flex: 1 }}
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Find Your Squad</Text>
         </View>
         <ErrorBanner error={actionError} />
+        <View
+          style={{
+            paddingHorizontal: 16,
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 8,
+          }}
+        >
+          <Button
+            label="Community rules"
+            fullWidth={false}
+            variant="secondary"
+            onPress={() => router.push("/policies/community" as any)}
+          />
+          <Button
+            label={agreed ? "Rules accepted" : "I agree to the rules"}
+            fullWidth={false}
+            variant="secondary"
+            onPress={() => setAgreed(true)}
+          />
+        </View>
         <View style={styles.composer} testID="community-composer">
           <TextInput
             testID="community-post-input"
@@ -67,9 +151,12 @@ export default function Community() {
             testID="community-post-btn"
             onPress={() => post()}
             disabled={posting || !text.trim()}
-            style={[styles.postBtn, (!text.trim() || posting) && { opacity: 0.4 }]}
+            style={[
+              styles.postBtn,
+              (!text.trim() || posting) && { opacity: 0.4 },
+            ]}
           >
-            <Text style={styles.postBtnText}>{posting ? '…' : 'Post'}</Text>
+            <Text style={styles.postBtnText}>{posting ? "…" : "Post"}</Text>
           </Pressable>
         </View>
         {loading ? (
@@ -80,35 +167,140 @@ export default function Community() {
             subtitle={loadError}
             icon="cloud-offline-outline"
             cta="Try again"
-            onCta={() => { setLoading(true); load(); }}
+            onCta={() => {
+              setLoading(true);
+              load();
+            }}
           />
         ) : (
           <FlatList
             data={posts}
             keyExtractor={(p) => p.id}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c.textFaint} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={c.textFaint}
+              />
+            }
             contentContainerStyle={{ paddingBottom: spacing.xxxl }}
             ItemSeparatorComponent={() => <Divider inset={spacing.lg} />}
-            ListEmptyComponent={<EmptyState title="No posts yet" subtitle="Be the first to share your game." icon="chatbubble-outline" testID="community-empty" />}
+            ListEmptyComponent={
+              <EmptyState
+                title="No posts yet"
+                subtitle="Be the first to share your game."
+                icon="chatbubble-outline"
+                testID="community-empty"
+              />
+            }
             renderItem={({ item }) => (
-              <View style={styles.postCard} testID={`community-post-${item.id}`}>
+              <View
+                style={styles.postCard}
+                testID={`community-post-${item.id}`}
+              >
                 <View style={styles.postHeader}>
-                  <Avatar uri={item.author?.avatar} name={item.author?.name} size={36} />
+                  <Avatar
+                    uri={item.author?.avatar}
+                    name={item.author?.name}
+                    size={36}
+                  />
                   <View style={{ flex: 1, marginLeft: spacing.sm }}>
-                    <Text style={styles.pName}>{item.author?.name || 'Player'}</Text>
-                    <Text style={styles.pTime}>{new Date(item.created_at).toLocaleDateString()}</Text>
+                    <Text style={styles.pName}>
+                      {item.author?.name || "Player"}
+                    </Text>
+                    <Text style={styles.pTime}>
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </Text>
                   </View>
                 </View>
                 <Text style={styles.pContent}>{item.content}</Text>
-                {item.image ? <Image source={{ uri: item.image }} style={styles.pImage} contentFit="cover" /> : null}
-                <View style={styles.pActions}>
-                  <Pressable onPress={() => like(item.id)} testID={`community-like-${item.id}`} style={styles.action} hitSlop={8}>
-                    <Ionicons name={item.liked ? 'heart' : 'heart-outline'} size={20} color={item.liked ? c.danger : c.textSecondary} />
-                    <Text style={[styles.actionText, item.liked && { color: c.text }]}>{item.likes}</Text>
+                {item.image ? (
+                  <Image
+                    source={{ uri: item.image }}
+                    style={styles.pImage}
+                    contentFit="cover"
+                  />
+                ) : null}
+                <View style={[styles.pActions, { flexWrap: "wrap", gap: 12 }]}>
+                  <Button
+                    label="Report"
+                    fullWidth={false}
+                    variant="secondary"
+                    onPress={() => {
+                      if (!requireAuth(user, router)) return;
+                      setEditor({
+                        title: "Report post",
+                        fields: [
+                          {
+                            key: "reason",
+                            label: "Reason",
+                            required: true,
+                            multiline: true,
+                          },
+                        ],
+                        save: async (v: any) => {
+                          await api.reportPost(item.id, v.reason);
+                          setActionError(null);
+                        },
+                      });
+                    }}
+                  />
+                  {item.author_id !== user?.id && (
+                    <Button
+                      label="Block player"
+                      fullWidth={false}
+                      variant="secondary"
+                      onPress={() => {
+                        if (!requireAuth(user, router)) return;
+                        setEditor({
+                          title: "Block player",
+                          fields: [
+                            {
+                              key: "confirm",
+                              label:
+                                "Type BLOCK to hide this player’s community posts",
+                              required: true,
+                            },
+                          ],
+                          save: async (v: any) => {
+                            if (v.confirm !== "BLOCK")
+                              throw new Error("Type BLOCK to continue");
+                            await api.blockUser(item.author_id);
+                            await load();
+                          },
+                        });
+                      }}
+                    />
+                  )}
+                  <Pressable
+                    onPress={() => like(item.id)}
+                    testID={`community-like-${item.id}`}
+                    style={styles.action}
+                    hitSlop={8}
+                  >
+                    <Ionicons
+                      name={item.liked ? "heart" : "heart-outline"}
+                      size={20}
+                      color={item.liked ? c.danger : c.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.actionText,
+                        item.liked && { color: c.text },
+                      ]}
+                    >
+                      {item.likes}
+                    </Text>
                   </Pressable>
                   <View style={styles.action}>
-                    <Ionicons name="chatbubble-outline" size={19} color={c.textSecondary} />
-                    <Text style={styles.actionText}>{item.comments_count || 0}</Text>
+                    <Ionicons
+                      name="chatbubble-outline"
+                      size={19}
+                      color={c.textSecondary}
+                    />
+                    <Text style={styles.actionText}>
+                      {item.comments_count || 0}
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -116,35 +308,84 @@ export default function Community() {
           />
         )}
       </KeyboardAvoidingView>
+      {editor && (
+        <WorkspaceEditor
+          {...editor}
+          context="MatchDrome community"
+          close={() => setEditor(undefined)}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: c.bg },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
-  title: { color: c.text, fontSize: font.sizes.xxxl, fontWeight: font.weights.heavy, letterSpacing: -0.5 },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  title: {
+    color: c.text,
+    fontSize: font.sizes.xxxl,
+    fontWeight: font.weights.heavy,
+    letterSpacing: -0.5,
+  },
   composer: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: spacing.sm,
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
     padding: spacing.md,
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
     backgroundColor: c.bgElevated,
     borderRadius: radius.md,
   },
-  composerInput: { flex: 1, color: c.text, fontSize: font.sizes.base, maxHeight: 100, minHeight: 40 },
-  postBtn: { backgroundColor: c.accent, paddingHorizontal: spacing.md, paddingVertical: 9, borderRadius: radius.pill },
-  postBtnText: { color: c.onAccent, fontWeight: font.weights.bold, fontSize: font.sizes.sm },
+  composerInput: {
+    flex: 1,
+    color: c.text,
+    fontSize: font.sizes.base,
+    maxHeight: 100,
+    minHeight: 40,
+  },
+  postBtn: {
+    backgroundColor: c.accent,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
+  },
+  postBtnText: {
+    color: c.onAccent,
+    fontWeight: font.weights.bold,
+    fontSize: font.sizes.sm,
+  },
   postCard: { padding: spacing.lg, gap: spacing.sm },
-  postHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  pAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: c.bgElevated },
-  pName: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
+  postHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  pAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: c.bgElevated,
+  },
+  pName: {
+    color: c.text,
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+  },
   pTime: { color: c.textMuted, fontSize: font.sizes.xs, marginTop: 2 },
   pContent: { color: c.text, fontSize: font.sizes.base, lineHeight: 22 },
-  pImage: { width: '100%', height: 220, borderRadius: radius.md, backgroundColor: c.bgElevated },
-  pActions: { flexDirection: 'row', gap: spacing.xl, marginTop: 2 },
-  action: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  actionText: { color: c.textSecondary, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
+  pImage: {
+    width: "100%",
+    height: 220,
+    borderRadius: radius.md,
+    backgroundColor: c.bgElevated,
+  },
+  pActions: { flexDirection: "row", gap: spacing.xl, marginTop: 2 },
+  action: { flexDirection: "row", alignItems: "center", gap: 6 },
+  actionText: {
+    color: c.textSecondary,
+    fontSize: font.sizes.sm,
+    fontWeight: font.weights.semibold,
+  },
 });

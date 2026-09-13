@@ -58,7 +58,7 @@ export default function Login() {
             {err ? <Text testID="login-error" style={styles.err}>{err}</Text> : null}
             <View style={{ height: spacing.lg }} />
             <Button label="Send OTP" onPress={submit} loading={loading} disabled={!/^[6-9]\d{9}$/.test(mobile)} testID="login-send-otp-button" />
-            <Text style={styles.terms}>By continuing you agree to MatchDrome’s Terms & Privacy.</Text>
+            <Text style={styles.terms}>By continuing you agree to MatchDrome’s <Text accessibilityRole="link" onPress={()=>router.push("/policies/terms" as any)}>Terms</Text> and <Text accessibilityRole="link" onPress={()=>router.push("/policies/privacy" as any)}>Privacy policy</Text>.</Text>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>

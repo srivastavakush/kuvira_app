@@ -1,6 +1,6 @@
 """Durable, retry-safe AI Coach analysis worker."""
 from __future__ import annotations
-import logging, os, socket, tempfile
+import asyncio, logging, os, socket, tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict
 from pymongo import ReturnDocument
@@ -27,6 +27,10 @@ async def run_analysis_job(db,job_id:str)->None:
     if not job:return
     async def set_stage(stage:str,progress:float,**extra:Any)->None:
         update={"stage":stage,"progress":float(progress),"heartbeat_at":_iso()}; update.update(extra); await db.ai_coach_jobs.update_one({"id":job_id,"locked_by":WORKER_ID},{"$set":update})
+    account = await db.users.find_one({"id": job["user_id"]}, {"deleted": 1, "deletion_requested": 1})
+    if account and (account.get("deleted") or account.get("deletion_requested")):
+        await set_stage("cancelled", 1.0, status="cancelled", completed_at=_iso(), locked_at=None, locked_by=None)
+        return
     video=await db.ai_coach_videos.find_one({"id":job["video_id"],"user_id":job["user_id"]},{"_id":0})
     if not video: await set_stage("failed",1.0,status="failed",completed_at=_iso(),error="video_missing",locked_at=None,locked_by=None); return
     storage=ObjectStorage(); temp_path=None
@@ -34,6 +38,10 @@ async def run_analysis_job(db,job_id:str)->None:
         storage_ref=video.get("storage") or {"backend":video.get("storage_backend"),"path":video.get("storage_path")}; suffix=os.path.splitext(video.get("original_filename","video.mp4"))[1] or ".mp4"
         async def progress_cb(stage:str,p:float)->None: await set_stage(stage,p)
         async def execute()->Any:
+            nonlocal temp_path
+            if temp_path:
+                try: os.unlink(temp_path)
+                except FileNotFoundError: pass
             analyzer:VideoAnalyzer=get_analyzer(job.get("sport","pickleball")); await db.ai_coach_jobs.update_one({"id":job_id,"locked_by":WORKER_ID},{"$set":{"analyzer":analyzer.name,"analyzer_version":analyzer.version}})
             for stage,p in STAGES[:2]: await set_stage(stage,p)
             gcs_uri=storage.gcs_uri(storage_ref)
@@ -59,6 +67,12 @@ async def run_analysis_job(db,job_id:str)->None:
         }
         await db.ai_coach_analytics.update_one({"match_id":job["match_id"],"user_id":job["user_id"]},{"$set":analytics_doc},upsert=True)
         await db.ai_coach_jobs.update_one({"id":job_id,"locked_by":WORKER_ID},{"$set":{"status":"completed","stage":"completed","progress":1.0,"completed_at":_iso(),"diagnostics":result.diagnostics,"locked_at":None,"locked_by":None}})
+        # Analytics are durable; reports are built from them, so source footage is no longer needed.
+        try:
+            await asyncio.to_thread(storage.delete,storage_ref)
+            await db.ai_coach_videos.update_one({'id':video['id']},{'$set':{'source_deleted_at':_iso()}})
+        except Exception:
+            await db.ai_coach_videos.update_one({'id':video['id']},{'$set':{'source_cleanup_pending':True}})
     except Exception as exc:
         await set_stage("failed",1.0,status="failed",completed_at=_iso(),error=str(exc)[:300],locked_at=None,locked_by=None)
     finally:

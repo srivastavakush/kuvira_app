@@ -115,9 +115,26 @@ class ObjectStorage:
             assert self._client is not None
             self._client.delete_object(Bucket=storage["bucket"], Key=storage["object_key"])
         elif backend == "gcs":
-            self._bucket.blob(storage["object_key"]).delete()
+            from google.api_core.exceptions import NotFound
+            try: self._bucket.blob(storage["object_key"]).delete()
+            except NotFound: pass
         else:
             path = storage.get("path") or storage.get("storage_path")
             if path:
                 try: os.unlink(path)
                 except FileNotFoundError: pass
+
+    def start_upload(self, video_id: str, extension: str, size: int, mime: str, origin: str | None = None):
+        if self.backend != 'gcs':
+            raise ValueError('Direct uploads require GCS')
+        key=self.key(video_id,extension)
+        blob=self._bucket.blob(key)
+        url=blob.create_resumable_upload_session(content_type=mime,size=size,origin=origin,if_generation_match=0,timeout=30)
+        return {'upload_url':url,'storage':{'backend':'gcs','bucket':self.bucket,'object_key':key,'uri':f'gs://{self.bucket}/{key}'}}
+
+    def verify_upload(self, reference: dict, expected_size: int):
+        blob=self._bucket.blob(reference['object_key']);blob.reload(timeout=30)
+        if blob.size != expected_size:
+            blob.delete(if_generation_match=blob.generation)
+            raise ValueError('Uploaded file size does not match')
+        return {**reference,'size_bytes':blob.size,'generation':blob.generation}

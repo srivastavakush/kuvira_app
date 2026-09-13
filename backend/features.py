@@ -58,6 +58,7 @@ async def book_coach_session(body: CoachBookingCreate, user=Depends(current_user
         "date": body.date,
         "slot": body.slot,
         "price": coach["price_per_session"],   # server-side price, never from client
+        "slot_active": True,
         "status": "pending_payment" if PAYMENT_PROVIDER == "payu" else "confirmed",
         "payment": {"provider": "payu", "status": "initiated", "amount": coach["price_per_session"]} if PAYMENT_PROVIDER == "payu" else {"provider": "mock_payu", "status": "paid", "amount": coach["price_per_session"]},
         "created_at": utcnow().isoformat(),

@@ -204,6 +204,7 @@ export default function Profile() {
           <Text style={styles.sectionLabel}>Activity</Text>
           <View style={styles.menuGroup}>
             {[
+              { key: 'support', label: 'Help & Privacy', icon: 'help-circle-outline', to: '/support' },
               { key: 'training', label: 'Training plans', icon: 'barbell-outline', to: '/training' },
               { key: 'rankings', label: 'Rankings & badges', icon: 'trophy-outline', to: '/rankings' },
               { key: 'bookings', label: 'My bookings', icon: 'calendar-outline', to: '/(tabs)/play?tab=my', badge: bookings.length },
