@@ -1,0 +1,102 @@
+name: Deploy MatchDrome to Cloud Run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy-gcp.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Service to deploy
+        required: true
+        default: all
+        type: choice
+        options: [all, api, web]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: kuvira-505010
+  REGION: asia-south1
+  REPOSITORY: kuvira
+  API_SERVICE: kuvira-api
+  WEB_SERVICE: kuvira-web
+  API_URL: https://kuvira-api-13914469738.asia-south1.run.app
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            api:
+              - 'backend/**'
+            web:
+              - 'frontend/**'
+
+  deploy-api:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'api') || github.event_name == 'push' && needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/13914469738/locations/global/workloadIdentityPools/matchdrome-github/providers/github
+          service_account: matchdrome-deployer@kuvira-505010.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Build backend image
+        run: docker build --tag "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/api:${{ github.sha }}" backend
+      - name: Push backend image
+        run: docker push "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/api:${{ github.sha }}"
+      - name: Deploy API revision
+        run: >-
+          gcloud run services update "$API_SERVICE"
+          --image "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/api:${{ github.sha }}"
+          --service-account matchdrome-runtime@$PROJECT_ID.iam.gserviceaccount.com
+          --region "$REGION" --quiet
+
+  deploy-web:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'web') || github.event_name == 'push' && needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/13914469738/locations/global/workloadIdentityPools/matchdrome-github/providers/github
+          service_account: matchdrome-deployer@kuvira-505010.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+      - name: Build frontend image
+        run: >-
+          docker build frontend
+          --build-arg EXPO_PUBLIC_BACKEND_URL=$API_URL
+          --build-arg EXPO_PUBLIC_AUTH_MODE=firebase
+          --tag "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/web:${{ github.sha }}"
+      - name: Push frontend image
+        run: docker push "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/web:${{ github.sha }}"
+      - name: Deploy web revision
+        run: >-
+          gcloud run services update "$WEB_SERVICE"
+          --image "$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/web:${{ github.sha }}"
+          --service-account matchdrome-runtime@$PROJECT_ID.iam.gserviceaccount.com
+          --region "$REGION" --quiet
