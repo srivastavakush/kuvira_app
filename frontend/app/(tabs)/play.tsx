@@ -26,7 +26,7 @@ const SKILL_FILTERS = [
 
 export default function Play() {
   const router = useRouter();
-  const { tab: requestedTab } = useLocalSearchParams<{ tab?: string }>();
+  const { tab: requestedTab, payment_result: paymentResult } = useLocalSearchParams<{ tab?: string; payment_result?: string }>();
   const { user } = useSession();
   const [tab, setTab] = useState(requestedTab || 'games');
   useEffect(() => { if (requestedTab) setTab(requestedTab); }, [requestedTab]);
@@ -65,6 +65,7 @@ export default function Play() {
           <Text style={styles.createBtnText}>New game</Text>
         </Pressable>
       </View>
+      {paymentResult && <View style={[styles.paymentNotice, paymentResult === 'succeeded' ? styles.paymentSuccess : styles.paymentFailed]}><Text style={styles.paymentNoticeText}>{paymentResult === 'succeeded' ? 'Payment successful — your booking is confirmed.' : 'Payment was not completed. You can try again from the court page.'}</Text></View>}
       <ChipRow items={TABS} active={tab} onChange={setTab} testIDPrefix="play-tab" />
       {tab === 'games' && <ChipRow items={SKILL_FILTERS} active={skill} onChange={setSkill} testIDPrefix="play-skill" />}
       {loading ? (
@@ -215,4 +216,8 @@ const styles = StyleSheet.create({
   bkMeta: { color: c.textMuted, fontSize: font.sizes.sm },
   bkFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
   bkPrice: { color: c.text, fontWeight: font.weights.bold, fontSize: font.sizes.base },
+  paymentNotice: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.sm },
+  paymentSuccess: { backgroundColor: 'rgba(39, 201, 121, 0.16)' },
+  paymentFailed: { backgroundColor: c.bgRaised, borderWidth: 1, borderColor: c.danger },
+  paymentNoticeText: { color: c.text, fontSize: font.sizes.sm, fontWeight: font.weights.semibold },
 });

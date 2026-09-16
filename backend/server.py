@@ -12,6 +12,7 @@ MVP scope:
 import os
 import html
 import asyncio
+from urllib.parse import urlencode
 from demo_records import real_records
 from io import BytesIO
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, File, UploadFile
@@ -551,16 +552,40 @@ async def payment_status(payment_id: str, user=Depends(current_user)):
     return {"payment": txn, "resource": item}
 
 
-async def _payu_callback_response(request: Request):
+def _payu_return_page(status: str) -> HTMLResponse:
+    """Return users to their signed-in web app after PayU's browser hand-off."""
+    app_url = os.environ.get("PAYU_APP_RETURN_URL", "").rstrip("/")
+    destination = f"{app_url}/play?{urlencode({'tab': 'my', 'payment_result': status})}"
+    safe_destination = html.escape(destination, quote=True)
+    safe_status = html.escape(status)
+    return HTMLResponse(
+        f'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<meta http-equiv="refresh" content="0;url={safe_destination}"><title>Returning to MatchDrome</title></head>'
+        f'<body><p>Payment {safe_status}. Returning to your bookings…</p>'
+        f'<p><a href="{safe_destination}">Open My Bookings</a></p></body></html>'
+    )
+
+
+async def _payu_callback_response(request: Request, redirect_to_app: bool = False):
     form = await request.form()
-    result = await process_callback(db, {str(key): str(value) for key, value in form.items()})
-    status = result["payment"]["status"]
-    return HTMLResponse(f"<html><body><h2>Payment {html.escape(status)}</h2><p>You may return to MatchDrome.</p></body></html>")
+    try:
+        result = await process_callback(db, {str(key): str(value) for key, value in form.items()})
+        status = result["payment"]["status"]
+    except KuviraError:
+        # PayU can return a failed/cancelled checkout with a valid browser
+        # return but no completed gateway record. Never mutate payment state;
+        # simply return the customer to their booking list with a failure cue.
+        if redirect_to_app:
+            return _payu_return_page("failed")
+        raise
+    if redirect_to_app:
+        return _payu_return_page(status)
+    return JSONResponse({"ok": True, "payment_status": status})
 
 
 @api.post("/payments/payu/return")
 async def payu_return(request: Request):
-    return await _payu_callback_response(request)
+    return await _payu_callback_response(request, redirect_to_app=True)
 
 
 @api.post("/payments/payu/webhook")

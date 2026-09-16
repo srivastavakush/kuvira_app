@@ -91,6 +91,9 @@ def validate_runtime_config() -> None:
         callback_base = os.environ.get("PAYU_CALLBACK_BASE_URL", "")
         if not callback_base.startswith("https://"):
             errors.append("PAYU_CALLBACK_BASE_URL must be a public https URL")
+        app_return_url = os.environ.get("PAYU_APP_RETURN_URL", "")
+        if not app_return_url.startswith("https://"):
+            errors.append("PAYU_APP_RETURN_URL must be a public https URL")
     if os.environ.get("AI_COACH_STORAGE_BACKEND", "local").lower() != "gcs" or not os.environ.get("AI_COACH_STORAGE_BUCKET"):
         errors.append("AI Coach production requires AI_COACH_STORAGE_BACKEND=gcs and AI_COACH_STORAGE_BUCKET")
     if os.environ.get("AI_PROVIDER", "openai").lower() != "vertex" or not os.environ.get("GOOGLE_CLOUD_PROJECT"):
