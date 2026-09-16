@@ -187,4 +187,14 @@ async def update_ticket(ticket_id:str,body:TicketUpdate,user=Depends(require_pla
 
 @router.get('/registrations/mine')
 async def my_registrations(user=Depends(current_user)):
-    return await db.tournament_registrations.find({'user_id':user['id']},{'_id':0}).sort('created_at',-1).to_list(100)
+    tournaments = await db.tournament_registrations.find({'user_id':user['id']},{'_id':0}).sort('created_at',-1).to_list(100)
+    events = await db.event_registrations.find({'user_id':user['id']},{'_id':0}).sort('created_at',-1).to_list(100)
+    result = []
+    for registration in tournaments:
+        item = dict(registration); item['resource_type'] = 'tournament_registration'; result.append(item)
+    for registration in events:
+        event = await db.events.find_one({'id': registration['event_id']}, {'_id': 0, 'name': 1, 'date': 1, 'venue': 1, 'image': 1, 'price': 1})
+        item = dict(registration)
+        item.update({'resource_type': 'event_registration', 'event_name': (event or {}).get('name', 'Event'), 'event_date': (event or {}).get('date'), 'event_venue': (event or {}).get('venue'), 'event_image': (event or {}).get('image', ''), 'price': (event or {}).get('price', 0)})
+        result.append(item)
+    return sorted(result, key=lambda item: item.get('created_at', ''), reverse=True)

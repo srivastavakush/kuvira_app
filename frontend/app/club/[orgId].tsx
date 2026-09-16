@@ -308,7 +308,7 @@ export default function ClubWorkspace() {
         </Text>
         <Button
           label="Back to home"
-          onPress={() => router.replace("/(tabs)")}
+          onPress={() => router.replace("/(tabs)/home")}
         />
       </SafeAreaView>
     );

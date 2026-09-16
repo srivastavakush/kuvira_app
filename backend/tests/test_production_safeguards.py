@@ -67,6 +67,39 @@ def test_missing_callback_recovers_confirmed_booking(gateway):
     assert db.bookings.update_one.call_args.kwargs['session']=='test-session'
 
 
+def test_interim_verify_failure_does_not_release_live_hold(gateway):
+    """An unsigned browser poll must not cancel checkout before PayU calls back."""
+    txn = {'id': 'p', 'txnid': 't', 'amount': '100.00', 'status': 'initiated',
+           'expires_at': '2999-01-01T00:00:00+00:00', 'resource': {'kind': 'booking', 'id': 'b'}}
+    gateway.verify.return_value = {'status': 'failure', 'amt': '100.00'}
+    db = MagicMock()
+    db.payment_transactions.find_one = AsyncMock(return_value=txn)
+    db.payment_transactions.update_one = AsyncMock()
+    db.bookings.find_one = AsyncMock(return_value={'id': 'b', 'status': 'pending_payment'})
+    db.bookings.update_one = AsyncMock()
+    result = run(payments.reconcile_payment(db, txn))
+    assert result['payment']['status'] == 'verification_pending'
+    db.bookings.update_one.assert_not_called()
+
+
+def test_verified_success_restores_only_expired_booking_when_slot_is_free(gateway):
+    txn = {'id': 'p', 'txnid': 't', 'amount': '100.00', 'status': 'succeeded',
+           'requires_review': True, 'resource': {'kind': 'booking', 'id': 'b'}}
+    gateway.verify.return_value = {'status': 'success', 'amt': '100.00'}
+    expired = {'id': 'b', 'status': 'cancelled', 'cancellation_source': 'payment_expired',
+               'facility_id': 'f', 'court_number': 1, 'date': '2026-12-01', 'slot': '08:00-09:00'}
+    db = MagicMock()
+    db.payment_transactions.find_one = AsyncMock(return_value=txn)
+    db.payment_transactions.update_one = AsyncMock()
+    db.bookings.find_one = AsyncMock(side_effect=[expired, None])
+    db.bookings.update_one = AsyncMock()
+    result = run(payments.reconcile_payment(db, txn))
+    assert result['resource']['status'] == 'confirmed'
+    changes = db.bookings.update_one.call_args.args[1]['$set']
+    assert changes['slot_active'] is True and changes['reservation_active'] is True
+    assert db.payment_transactions.update_one.call_args.args[1]['$set']['requires_review'] is False
+
+
 def test_expiry_returns_reserved_stock_once():
     db=MagicMock();item={'id':'o','status':'pending_payment','inventory_reserved':True,'items':[{'product':{'id':'sku'},'qty':2}]}
     db.orders.find_one=AsyncMock(return_value=item);db.orders.update_one=AsyncMock();db.products.update_one=AsyncMock()

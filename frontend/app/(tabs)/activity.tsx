@@ -34,7 +34,7 @@ export default function Activity() {
       results
         .flatMap((r, i) =>
           r.status === "fulfilled" && Array.isArray(r.value)
-            ? r.value.map((item) => ({ ...item, kind: labels[i] }))
+            ? r.value.map((item) => ({ ...item, kind: i === 3 && item.resource_type === 'event_registration' ? 'Event' : labels[i] }))
             : [],
         )
         .sort(

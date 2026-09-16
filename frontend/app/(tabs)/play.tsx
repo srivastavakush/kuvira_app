@@ -40,9 +40,16 @@ export default function Play() {
 
   const load = useCallback(async () => {
     setLoadError(null);
-    const results = await Promise.allSettled([api.games(skill !== 'all' ? { skill } : {}), api.players(), user ? api.myBookings() : Promise.resolve([])]);
-    const setters = [setGames, setPlayers, setBookings];
-    results.forEach((r, i) => { if (r.status === 'fulfilled' && Array.isArray(r.value)) setters[i](r.value); });
+    const results = await Promise.allSettled([
+      api.games(skill !== 'all' ? { skill } : {}), api.players(),
+      user ? api.myBookings() : Promise.resolve([]),
+      user ? api.myRegistrations() : Promise.resolve([]),
+    ]);
+    const setters = [setGames, setPlayers];
+    results.slice(0, 2).forEach((r, i) => { if (r.status === 'fulfilled' && Array.isArray(r.value)) setters[i](r.value); });
+    const courtBookings = results[2].status === 'fulfilled' && Array.isArray(results[2].value) ? results[2].value : [];
+    const registrations = results[3].status === 'fulfilled' && Array.isArray(results[3].value) ? results[3].value : [];
+    setBookings([...courtBookings, ...registrations].sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || ''))));
     if (results.some(r => r.status === 'rejected')) setLoadError('Some games or players couldn’t load. Try again.');
     setLoading(false);
   }, [skill, user]);
@@ -150,7 +157,7 @@ export default function Play() {
               ListEmptyComponent={
                 <EmptyState
                   title="No bookings yet"
-                  subtitle="Book a court and it'll appear here."
+                  subtitle="Court bookings and event registrations will appear here."
                   cta="Discover courts"
                   onCta={() => router.push('/(tabs)/discover')}
                   icon="calendar-outline"
@@ -159,14 +166,13 @@ export default function Play() {
               }
               renderItem={({ item }) => (
                 <View style={styles.bkCard} testID={`play-booking-${item.id}`}>
-                  <Image source={{ uri: item.facility_image }} style={styles.bkImg} />
+                  <Image source={{ uri: item.event_image || item.facility_image }} style={styles.bkImg} />
                   <View style={{ flex: 1, padding: spacing.md, gap: 4 }}>
-                    <Text style={styles.bkName} numberOfLines={1}>{item.facility_name}</Text>
-                    <Text style={styles.bkMeta}>{item.date} · {item.slot}</Text>
-                    <Text style={styles.bkMeta}>Court {item.court_number}</Text>
+                    <Text style={styles.bkName} numberOfLines={1}>{item.resource_type === 'event_registration' ? item.event_name : item.facility_name}</Text>
+                    {item.resource_type === 'event_registration' ? <><Text style={styles.bkMeta}>Event · {item.event_date || 'Date to be announced'}</Text><Text style={styles.bkMeta}>{item.event_venue || 'Venue to be announced'}</Text></> : <><Text style={styles.bkMeta}>{item.date} · {item.slot}</Text><Text style={styles.bkMeta}>Court {item.court_number}</Text></>}
                     <View style={styles.bkFoot}>
                       <Badge label={item.status} variant="success" size="sm" />
-                      <Text style={styles.bkPrice}>₹{item.price}</Text>
+                      <Text style={styles.bkPrice}>₹{item.price || item.payment?.amount || 0}</Text>
                     </View>
                   </View>
                 </View>

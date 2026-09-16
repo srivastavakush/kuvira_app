@@ -166,10 +166,13 @@ async def process_callback(db: Any, payload: dict[str, Any]) -> dict[str, Any]:
         raise KuviraError(400, "PAYU_HASH_INVALID", "Payment callback could not be verified")
     if _amount(payload.get("amount")) != txn["amount"]:
         raise KuviraError(400, "PAYU_AMOUNT_MISMATCH", "Payment amount does not match")
-    return await reconcile_payment(db, txn)
+    # A browser callback is authenticated by the reverse hash. Keep this
+    # signal separate from a background Verify response, which can temporarily
+    # report a payment as failed while the customer is still on PayU.
+    return await reconcile_payment(db, txn, callback_status=str(payload.get('status') or '').lower())
 
 
-async def reconcile_payment(db, txn):
+async def reconcile_payment(db, txn, callback_status: str | None = None):
     from reservations import atomic, release
     verification = await _payu().verify(txn['txnid'])
     status = str(verification.get('status', '')).lower()
@@ -180,7 +183,17 @@ async def reconcile_payment(db, txn):
     async def operation(session):
         current = await db.payment_transactions.find_one({'id':txn['id']}, session=session)
         if current['status'] == 'succeeded':
-            return {'payment': {'id':txn['id'],'status':'succeeded'}, 'resource':None}
+            # Recover a verified booking that was released by an old client
+            # poll before its PayU success callback arrived. The recovery is
+            # deliberately limited to a payment-expired cancellation and the
+            # slot is checked again before it is reactivated.
+            resource = None
+            if current.get('requires_review'):
+                resource = await fulfill_succeeded_payment(db, current, session)
+                if resource:
+                    await db.payment_transactions.update_one({'id':txn['id']}, {'$set':{
+                        'requires_review':False, 'refund_status':'none', 'updated_at':_now()}}, session=session)
+            return {'payment': {'id':txn['id'],'status':'succeeded'}, 'resource':resource}
         if status == 'success':
             resource = await fulfill_succeeded_payment(db, current, session)
             await db.payment_transactions.update_one({'id':txn['id']}, {'$set':{
@@ -188,9 +201,11 @@ async def reconcile_payment(db, txn):
                 'requires_review':resource is None,'refund_status':'review_required' if resource is None else 'none'}}, session=session)
             return {'payment':{'id':txn['id'],'status':'succeeded'},'resource':resource}
         expired = current.get('expires_at', '') and current['expires_at'] < _now()
-        failed = status in ('failure','failed','dropped','bounced')
-        # A missing gateway record after the checkout window closes is an abandoned checkout.
-        if failed or (expired and (not verification or status == 'not found')):
+        # Never cancel an active reservation merely because a polling Verify
+        # call has an interim failure. Only PayU's signed failure callback, or
+        # genuine checkout expiry, may release inventory.
+        failed = callback_status in ('failure','failed','dropped','bounced')
+        if failed or expired:
             await release(db, current['resource'], session)
             state = 'failed' if failed else 'expired'
         else:
@@ -221,12 +236,28 @@ async def fulfill_succeeded_payment(db, txn, session):
     if collection is None:
         raise KuviraError(400,'UNKNOWN_PAYMENT_RESOURCE','Unsupported payment resource')
     item = await collection.find_one({'id':rid},session=session)
-    # A late payment for a released/cancelled reservation requires support/refund review.
-    if not item or item.get('status') not in ('pending_payment','confirmed'):
+    if not item:
         return None
     if item['status']=='confirmed': return {k:v for k,v in item.items() if k!='_id'}
+    # A payment that PayU verified can be restored only if the booking was
+    # auto-released for expiry and no other active booking took that same slot.
+    recovering_booking = kind == 'booking' and item.get('status') == 'cancelled' and item.get('cancellation_source') == 'payment_expired'
+    if item.get('status') != 'pending_payment' and not recovering_booking:
+        return None
+    if recovering_booking:
+        occupied = await db.bookings.find_one({
+            'facility_id': item['facility_id'], 'court_number': item['court_number'],
+            'date': item['date'], 'slot': item['slot'], 'slot_active': True,
+            'id': {'$ne': rid},
+        }, session=session)
+        if occupied:
+            return None
     payment={'provider':'payu','status':'paid','amount':txn['amount'],'payment_id':txn['id'],'txnid':txn['txnid']}
-    await collection.update_one({'id':rid,'status':'pending_payment'},{'$set':{'status':'confirmed','payment':payment,'confirmed_at':_now()}},session=session)
+    query = {'id':rid,'status':'cancelled','cancellation_source':'payment_expired'} if recovering_booking else {'id':rid,'status':'pending_payment'}
+    changes = {'status':'confirmed','payment':payment,'confirmed_at':_now()}
+    if recovering_booking:
+        changes.update({'slot_active':True, 'reservation_active':True, 'cancellation_source':None})
+    await collection.update_one(query,{'$set':changes},session=session)
     if kind=='tournament_registration':
         changes={'participants_count':1}
         if item.get('inventory_reserved'):changes['reserved_count']=-1
