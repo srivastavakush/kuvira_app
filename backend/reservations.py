@@ -15,7 +15,8 @@ async def atomic(db, callback):
 async def release(db, resource, session):
     kind, rid = resource['kind'], resource['id']
     collection = {'booking': db.bookings, 'coach_session': db.coach_sessions,
-                  'order': db.orders, 'tournament_registration': db.tournament_registrations}[kind]
+                  'order': db.orders, 'tournament_registration': db.tournament_registrations,
+                  'event_registration': db.event_registrations}[kind]
     item = await collection.find_one({'id': rid}, session=session)
     if not item or item.get('status') != 'pending_payment':
         return
@@ -27,6 +28,8 @@ async def release(db, resource, session):
             await db.products.update_one({'id': line['product']['id']}, {'$inc': {'stock': line['qty']}}, session=session)
     if kind == 'tournament_registration' and item.get('inventory_reserved'):
         await db.tournaments.update_one({'id': item['tournament_id']}, {'$inc': {'reserved_count': -1}}, session=session)
+    if kind == 'event_registration' and item.get('inventory_reserved'):
+        await db.events.update_one({'id': item['event_id']}, {'$inc': {'reserved_count': -1}}, session=session)
 
 async def reserve_order(db, user, address, email):
     from payments import create_checkout
@@ -83,6 +86,63 @@ async def reserve_tournament(db, tid, user, email):
         await db.tournament_registrations.update_one({'id':reg['id']},{'$set':{'payment':checkout['payment']}},session=session)
         return {'registration':reg,**checkout}
     return await atomic(db,operation)
+
+
+async def reserve_event(db, eid, user, email):
+    """Reserve an event place and create PayU checkout when an entry fee applies."""
+    from payments import create_checkout
+
+    async def operation(session):
+        event = await db.events.find_one(
+            real_records('events', {'id': eid, 'status': 'published', 'is_demo': {'$ne': True}}), session=session
+        )
+        if not event:
+            raise KuviraError(404, 'EVENT_UNAVAILABLE', 'This event is not open for joining')
+        if str(event.get('date') or '')[:10] < datetime.now(timezone.utc).date().isoformat():
+            raise KuviraError(409, 'EVENT_ENDED', 'This event has already ended')
+        existing = await db.event_registrations.find_one(
+            {'event_id': eid, 'user_id': user['id'], 'status': {'$in': ['confirmed', 'pending_payment']}},
+            session=session,
+        )
+        if existing:
+            raise KuviraError(409, 'ALREADY_REGISTERED', 'You already have a place at this event')
+
+        # Missing/zero capacity means the organiser has not set a limit.
+        capacity = int(event.get('max_participants') or 0)
+        occupied = await db.event_registrations.count_documents(
+            {'event_id': eid, 'status': {'$in': ['confirmed', 'pending_payment']}}, session=session
+        )
+        if capacity and occupied >= capacity:
+            raise KuviraError(409, 'EVENT_FULL', 'This event is full')
+
+        await db.events.update_one({'id': eid}, {'$inc': {'reserved_count': 1}}, session=session)
+        registration = {
+            'id': gen_id(), 'event_id': eid, 'user_id': user['id'],
+            'status': 'pending_payment', 'reservation_active': True, 'inventory_reserved': True,
+            'created_at': datetime.now(timezone.utc).isoformat(), 'expires_at': expires_at(),
+        }
+        await db.event_registrations.insert_one(dict(registration), session=session)
+        price = event.get('price') or 0
+        if not price:
+            await db.event_registrations.update_one(
+                {'id': registration['id']}, {'$set': {'status': 'confirmed'}}, session=session
+            )
+            await db.events.update_one(
+                {'id': eid}, {'$inc': {'reserved_count': -1, 'participants_count': 1}}, session=session
+            )
+            registration['status'] = 'confirmed'
+            return {'registration': registration}
+        checkout = await create_checkout(
+            db, user=user, resource={'kind': 'event_registration', 'id': registration['id']},
+            amount=price, productinfo=f"Event registration - {event.get('name', 'MatchDrome event')}",
+            customer_email=email, session=session,
+        )
+        await db.event_registrations.update_one(
+            {'id': registration['id']}, {'$set': {'payment': checkout['payment']}}, session=session
+        )
+        return {'registration': registration, **checkout}
+
+    return await atomic(db, operation)
 
 async def reserve_booking(db, body, user):
     from payments import create_checkout

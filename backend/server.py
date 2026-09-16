@@ -38,7 +38,7 @@ import org_admin
 import trust
 from public_profiles import public_player
 from payments import PayU, checkout_html, create_checkout, process_callback, reconcile_payment
-from reservations import reserve_order, reserve_tournament, reserve_booking
+from reservations import reserve_order, reserve_tournament, reserve_event, reserve_booking
 from profile_media import ProfileMediaStorage
 
 PLATFORM_ADMIN_MOBILES = [m.strip() for m in os.environ.get("PLATFORM_ADMIN_MOBILES", "").split(",") if m.strip()]
@@ -157,6 +157,8 @@ async def ensure_indexes():
     await db.facilities.create_index([("location", "2dsphere")], sparse=True)
     await db.games.create_index("facility_id")
     await db.orders.create_index("user_id")
+    await db.event_registrations.create_index([("event_id", 1), ("user_id", 1)])
+    await db.event_registrations.create_index([("user_id", 1), ("status", 1)])
     await db.payment_transactions.create_index("txnid", unique=True)
     await db.payment_transactions.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
     await db.user_blocks.create_index([("user_id", 1), ("target_id", 1)], unique=True)
@@ -525,7 +527,9 @@ async def my_bookings(user=Depends(current_user)):
 async def payu_checkout(payment_id: str, token: str):
     """Public, opaque one-time checkout page that auto-posts to PayU."""
     txn = await db.payment_transactions.find_one({"id": payment_id, "checkout_token": token}, {"_id": 0})
-    if not txn or txn.get("status") != "initiated":
+    # A web browser can ask for status while its checkout navigation is still
+    # starting. Keep a valid, unexpired checkout usable in that short window.
+    if not txn or txn.get("status") not in {"initiated", "verification_pending"}:
         raise HTTPException(404, "Payment checkout is no longer available")
     if txn.get("expires_at") and txn["expires_at"] < utcnow().isoformat():
         raise HTTPException(410, "Checkout expired; please make a new booking")
@@ -542,7 +546,7 @@ async def payment_status(payment_id: str, user=Depends(current_user)):
         await reconcile_payment(db, txn)
         txn = await db.payment_transactions.find_one({"id": payment_id}, {"_id":0,"checkout_token":0,"payu_response":0,"verification":0})
     resource = txn.get("resource") or {}
-    collection = {"booking": db.bookings, "coach_session": db.coach_sessions, "tournament_registration": db.tournament_registrations, "order": db.orders}.get(resource.get("kind"))
+    collection = {"booking": db.bookings, "coach_session": db.coach_sessions, "tournament_registration": db.tournament_registrations, "event_registration": db.event_registrations, "order": db.orders}.get(resource.get("kind"))
     item = await collection.find_one({"id": resource.get("id")}, {"_id": 0}) if collection is not None else None
     return {"payment": txn, "resource": item}
 
@@ -667,6 +671,7 @@ async def list_events(city: Optional[str] = None, published_only: bool = True):
     if city: q["city"] = city
     q["is_demo"] = {"$ne": True}
     q["status"] = "published"
+    q['date'] = {'$gte': utcnow().date().isoformat()}
     return await db.events.find(real_records('events', q), {'_id': 0}).sort('date', 1).to_list(100)
 
 @api.get('/events/{eid}')
@@ -674,6 +679,10 @@ async def get_event(eid: str):
     e = await db.events.find_one(real_records('events', {'id': eid, 'is_demo': {'$ne': True}, 'status': 'published'}), {'_id': 0})
     if not e: raise HTTPException(404, 'Event not found')
     return e
+
+@api.post('/events/{eid}/register')
+async def register_event(eid: str, body: Optional[PaymentContact] = None, user=Depends(current_user)):
+    return await reserve_event(db, eid, user, body.customer_email if body else None)
 
 @api.get('/tournaments')
 async def list_tournaments(city: Optional[str] = None, published_only: bool = True):

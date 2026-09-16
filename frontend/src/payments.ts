@@ -1,11 +1,21 @@
 import * as WebBrowser from "expo-web-browser";
+import { Platform } from "react-native";
 import { api, apiBaseUrl } from "@/src/api";
 /** Open only the backend's own checkout path; payment success comes from verification. */
 export async function openCheckout(result: any) {
   if (!result.checkout_url || !result.payment?.id) return;
   if (!String(result.checkout_url).startsWith("/api/payments/checkout/"))
     throw new Error("The payment link is unavailable. Please try again.");
-  await WebBrowser.openBrowserAsync(`${apiBaseUrl}${result.checkout_url}`);
+  const checkoutUrl = `${apiBaseUrl}${result.checkout_url}`;
+  // A web popup resolves before its checkout request has begun. That caused a
+  // status poll to mark a new payment as pending and made the hosted form 404.
+  // Navigate the top-level page on web so PayU owns the payment hand-off.
+  if (Platform.OS === "web") {
+    window.location.assign(checkoutUrl);
+    await new Promise<void>(() => undefined);
+    return;
+  }
+  await WebBrowser.openBrowserAsync(checkoutUrl);
 }
 export async function verifiedPayment(paymentId: string) {
   const status = await api.paymentStatus(paymentId);

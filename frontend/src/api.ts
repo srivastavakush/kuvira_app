@@ -132,6 +132,7 @@ export const api={
   coaches:()=>request('/coaches'),coach:(id:string)=>request(`/coaches/${id}`),
   events:(p?:{city?:string,published_only?:boolean})=>request(`/events${p&&Object.keys(p).length?'?'+new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([,v])=>v!=null).map(([k,v])=>[k,String(v)]))).toString():''}`),
   event:(id:string)=>request(`/events/${id}`),
+  registerEvent:(id:string,customer_email?:string)=>request(`/events/${id}/register`,{method:'POST',body:JSON.stringify({customer_email})}),
   tournaments:(p?:{city?:string,published_only?:boolean})=>request(`/tournaments${p&&Object.keys(p).length?'?'+new URLSearchParams(Object.fromEntries(Object.entries(p).filter(([,v])=>v!=null).map(([k,v])=>[k,String(v)]))).toString():''}`),
   tournament:(id:string)=>request(`/tournaments/${id}`),
   registerTournament:(id:string,customer_email?:string)=>request(`/tournaments/${id}/register`,{method:'POST',body:JSON.stringify({customer_email})}),

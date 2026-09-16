@@ -215,7 +215,9 @@ async def expire_holds(db, limit=30):
 
 async def fulfill_succeeded_payment(db, txn, session):
     resource = txn['resource']; kind, rid = resource['kind'], resource['id']
-    collection = {'booking':db.bookings,'coach_session':db.coach_sessions,'order':db.orders,'tournament_registration':db.tournament_registrations}.get(kind)
+    collection = {'booking':db.bookings,'coach_session':db.coach_sessions,'order':db.orders,
+                  'tournament_registration':db.tournament_registrations,
+                  'event_registration':db.event_registrations}.get(kind)
     if collection is None:
         raise KuviraError(400,'UNKNOWN_PAYMENT_RESOURCE','Unsupported payment resource')
     item = await collection.find_one({'id':rid},session=session)
@@ -229,5 +231,9 @@ async def fulfill_succeeded_payment(db, txn, session):
         changes={'participants_count':1}
         if item.get('inventory_reserved'):changes['reserved_count']=-1
         await db.tournaments.update_one({'id':item['tournament_id']},{'$inc':changes},session=session)
+    if kind=='event_registration':
+        changes={'participants_count':1}
+        if item.get('inventory_reserved'):changes['reserved_count']=-1
+        await db.events.update_one({'id':item['event_id']},{'$inc':changes},session=session)
     # Do not wipe a cart the customer may have edited while checkout was open.
     return {'id':rid,'status':'confirmed','payment':payment}
